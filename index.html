@@ -970,9 +970,9 @@
 
                 const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
                 gradient.addColorStop(0, 'rgba(255,255,255,1)');
-                gradient.addColorStop(0.2, 'rgba(255,255,255,0.85)');
-                gradient.addColorStop(0.55, 'rgba(255,255,255,0.25)');
-                gradient.addColorStop(1, 'rgba(255,255,255,0)');
+                gradient.addColorStop(0.35, 'rgba(255,255,255,1)'); // Solid bright core
+                gradient.addColorStop(0.6, 'rgba(255,255,255,0.45)'); // Semi-sharp falloff
+                gradient.addColorStop(1, 'rgba(255,255,255,0)'); // Soft edge
 
                 ctx.fillStyle = gradient;
                 ctx.fillRect(0, 0, size, size);
@@ -1347,6 +1347,7 @@
                     antialias: true, 
                     alpha: true  // Enable transparency
                 });
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
                 renderer.setSize(window.innerWidth, window.innerHeight);
                 renderer.setClearColor(0x000000, 0); // Transparent background
                 threeContainer.appendChild(renderer.domElement);
