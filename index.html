@@ -237,7 +237,7 @@
                 <button type="button" data-shape="sphere" class="active">Sphere</button>
                 <button type="button" data-shape="galaxy">Galaxy</button>
                 <button type="button" data-shape="saturn">Saturn</button>
-                <button type="button" data-shape="lotus">Lotus</button>
+                <button type="button" data-shape="spring">Spring</button>
                 <button type="button" data-shape="leaf">Leaf 🍃</button>
                 <button type="button" data-shape="heart">Heart</button>
                 <button type="button" data-shape="nailong">Nailong P.</button>
@@ -287,6 +287,7 @@
             // Shape morphing variables
             let targetShape = 'sphere';
             let sphereWeight = 1.0;
+            let springWeight = 0.0;
             let nailongBasePositions = null;
             let nailongColors = null;
             let nailongLoaded = false;
@@ -296,13 +297,13 @@
             let spherePositions = null;
             let galaxyPositions = null;
             let saturnPositions = null;
-            let lotusPositions = null;
+            let springPositions = null;
             let leafPositions = null;
             let heartPositions = null;
 
             let galaxyColors = null;
             let saturnColors = null;
-            let lotusColors = null;
+            let springColors = null;
             let leafColors = null;
             let heartColors = null;
 
@@ -1080,7 +1081,7 @@
                     spherePositions = new Float32Array(count * 3);
                     galaxyPositions = new Float32Array(count * 3);
                     saturnPositions = new Float32Array(count * 3);
-                    lotusPositions = new Float32Array(count * 3);
+                    springPositions = new Float32Array(count * 3);
                     leafPositions = new Float32Array(count * 3);
                     heartPositions = new Float32Array(count * 3);
                 }
@@ -1089,7 +1090,7 @@
                 sphereColors = new Float32Array(count * 3);
                 galaxyColors = new Float32Array(count * 3);
                 saturnColors = new Float32Array(count * 3);
-                lotusColors = new Float32Array(count * 3);
+                springColors = new Float32Array(count * 3);
                 leafColors = new Float32Array(count * 3);
                 heartColors = new Float32Array(count * 3);
 
@@ -1205,56 +1206,31 @@
                         saturnColors[idx + 2] = rColor.b;
                     }
 
-                    // ==================== LOTUS ====================
+                    // ==================== SPRING ====================
                     if (initPositions) {
-                        // 15% center pistil, 85% layered petals
-                        if (i < count * 0.15) {
-                            const r = Math.random() * 0.3;
-                            const theta = Math.random() * Math.PI * 2;
-                            const h = (Math.random() * 2 - 1) * 0.15;
-                            
-                            lotusPositions[idx] = r * Math.cos(theta);
-                            lotusPositions[idx + 1] = h - 0.5;
-                            lotusPositions[idx + 2] = r * Math.sin(theta);
-                        } else {
-                            const petalIdx = i % 4;
-                            const numPetals = [6, 10, 14, 18][petalIdx];
-                            const scale = [0.85, 1.25, 1.65, 2.05][petalIdx];
-                            const tilt = [0.25, 0.45, 0.70, 0.95][petalIdx];
-                            
-                            const pIndex = Math.floor(Math.random() * numPetals);
-                            const phi0 = (pIndex + (petalIdx % 2) * 0.5) * (Math.PI * 2 / numPetals);
-                            
-                            const u = Math.random();
-                            const v = Math.random() * 2 - 1;
-                            
-                            const w = 0.35 * Math.sin(Math.PI * u) * (1.0 - 0.25 * u);
-                            
-                            const lx = v * w * scale;
-                            const ly = u * 1.6 * scale;
-                            const lz = -0.22 * Math.sin(Math.PI * u) * scale;
-                            
-                            const cosT = Math.cos(tilt);
-                            const sinT = Math.sin(tilt);
-                            const ty = ly * cosT - lz * sinT;
-                            const tz = ly * sinT + lz * cosT;
-                            
-                            lotusPositions[idx] = lx * Math.cos(phi0) + tz * Math.sin(phi0);
-                            lotusPositions[idx + 1] = ty - 0.7;
-                            lotusPositions[idx + 2] = -lx * Math.sin(phi0) + tz * Math.cos(phi0);
-                        }
+                        const t = i / (count - 1);
+                        const turns = 6.5;
+                        const theta = t * turns * Math.PI * 2;
+                        const rBase = 0.52;
+                        const rWire = 0.075;
+                        
+                        // Volumetric thickness: sample randomly inside a cylinder-tube around the helix path
+                        const rTube = Math.random() * rWire;
+                        const phi = Math.random() * Math.PI * 2;
+                        
+                        const xBase = rBase * Math.cos(theta);
+                        const zBase = rBase * Math.sin(theta);
+                        // Vertical stretch goes from -1.1 to 1.1 initially (centered at Y = 0)
+                        const yBase = (t - 0.5) * 2.2;
+                        
+                        springPositions[idx] = xBase + rTube * Math.cos(phi) * Math.cos(theta);
+                        springPositions[idx + 1] = yBase + rTube * Math.sin(phi);
+                        springPositions[idx + 2] = zBase + rTube * Math.cos(phi) * Math.sin(theta);
                     }
-                    if (i < count * 0.15) {
-                        const pistilColor = new THREE.Color(0xffe066).multiplyScalar(bright);
-                        lotusColors[idx] = pistilColor.r;
-                        lotusColors[idx + 1] = pistilColor.g;
-                        lotusColors[idx + 2] = pistilColor.b;
-                    } else {
-                        const pColor = getGradientColor(0.1 + 0.8 * (i % 5 / 5)).multiplyScalar(bright);
-                        lotusColors[idx] = pColor.r;
-                        lotusColors[idx + 1] = pColor.g;
-                        lotusColors[idx + 2] = pColor.b;
-                    }
+                    const pColor = getGradientColor(0.12 + 0.72 * (i / (count - 1))).multiplyScalar(bright);
+                    springColors[idx] = pColor.r;
+                    springColors[idx + 1] = pColor.g;
+                    springColors[idx + 2] = pColor.b;
 
                     // ==================== LEAF ====================
                     if (initPositions) {
@@ -1363,7 +1339,7 @@
             function getTargetPositionArray(shape) {
                 if (shape === 'galaxy') return galaxyPositions;
                 if (shape === 'saturn') return saturnPositions;
-                if (shape === 'lotus') return lotusPositions;
+                if (shape === 'spring') return springPositions;
                 if (shape === 'leaf') return leafPositions;
                 if (shape === 'heart') return heartPositions;
                 if (shape === 'nailong' || shape === 'nailong_solid') {
@@ -1375,7 +1351,7 @@
             function getTargetColorArray(shape) {
                 if (shape === 'galaxy') return galaxyColors;
                 if (shape === 'saturn') return saturnColors;
-                if (shape === 'lotus') return lotusColors;
+                if (shape === 'spring') return springColors;
                 if (shape === 'leaf') return leafColors;
                 if (shape === 'heart') return heartColors;
                 if (shape === 'nailong' || shape === 'nailong_solid') {
@@ -1504,7 +1480,24 @@
                 // Rotate the sphere continuously, regardless of hand interaction
                 if (sphere) {
                     currentSphereSize = currentSphereSize + (controlState.targetScale - currentSphereSize) * smoothingFactor;
-                    sphere.scale.set(currentSphereSize, currentSphereSize, currentSphereSize);
+                    
+                    // Smoothly update springWeight (transitioning to spring scaling)
+                    const targetSpringWeight = (targetShape === 'spring') ? 1.0 : 0.0;
+                    springWeight += (targetSpringWeight - springWeight) * 0.08;
+
+                    let scaleX = currentSphereSize;
+                    let scaleY = currentSphereSize;
+                    let scaleZ = currentSphereSize;
+
+                    if (springWeight > 0.001) {
+                        const springScaleY = currentSphereSize;
+                        // 1.25 / Math.sqrt(currentSphereSize) implements thinning when stretched, widening when compressed
+                        const springScaleXZ = 1.25 / Math.sqrt(currentSphereSize);
+                        scaleY = springScaleY;
+                        scaleX = THREE.MathUtils.lerp(currentSphereSize, springScaleXZ, springWeight);
+                        scaleZ = THREE.MathUtils.lerp(currentSphereSize, springScaleXZ, springWeight);
+                    }
+                    sphere.scale.set(scaleX, scaleY, scaleZ);
 
                     if (controlState.handDetected) {
                         if (targetShape === 'heart') {
@@ -1842,12 +1835,12 @@
                 } else if (raisedCount === 3 && indexExtended && middleExtended && ringExtended) {
                     targetGestureShape = 'saturn';
                 } else if (raisedCount === 4 && indexExtended && middleExtended && ringExtended && pinkyExtended) {
-                    // Check if thumb is also extended (5 fingers open palm -> Leaf, 4 fingers -> Lotus)
+                    // Check if thumb is also extended (5 fingers open palm -> Leaf, 4 fingers -> Spring)
                     const thumbExtended = (calculateDistance(primaryHand[4], primaryHand[5]) / palmLength) > 0.58;
                     if (thumbExtended) {
                         targetGestureShape = 'leaf';
                     } else {
-                        targetGestureShape = 'lotus';
+                        targetGestureShape = 'spring';
                     }
                 } else if (raisedCount === 0) {
                     targetGestureShape = 'heart'; // Fist also maps to heart
