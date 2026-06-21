@@ -235,8 +235,16 @@
             </div>
             <div class="shape-buttons">
                 <button type="button" data-shape="sphere" class="active">Sphere</button>
-                <button type="button" data-shape="nailong">Nailong Particles</button>
-                <button type="button" data-shape="nailong_solid">Nailong Solid</button>
+                <button type="button" data-shape="galaxy">Galaxy</button>
+                <button type="button" data-shape="saturn">Saturn</button>
+                <button type="button" data-shape="lotus">Lotus</button>
+                <button type="button" data-shape="heart">Heart</button>
+                <button type="button" data-shape="nailong">Nailong P.</button>
+                <button type="button" data-shape="nailong_solid" style="grid-column: span 3;">Nailong Solid</button>
+            </div>
+            <div class="color-picker-container" style="margin: 8px 0; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 8px;">
+                <label for="particle-color" style="font-size: 12px; color: rgba(255, 255, 255, 0.85);">Nebula Color:</label>
+                <input type="color" id="particle-color" value="#00e5ff" style="border: none; background: none; cursor: pointer; width: 45px; height: 26px; padding: 0; border-radius: 4px;">
             </div>
             <div id="control-readout"></div>
         </div>
@@ -269,17 +277,38 @@
             // Three.js variables
             let scene, camera, renderer;
             let sphere, solidMesh, wireframeMesh, particleMesh, particleMaterial;
-            let particleBasePositions = null;
             let sphereColors = null;
             let particlePhases = null;
             
             // Shape morphing variables
             let targetShape = 'sphere';
-            let morphProgress = 0.0;
+            let sphereWeight = 1.0;
             let nailongBasePositions = null;
             let nailongColors = null;
             let nailongLoaded = false;
             let isNailongLoading = false;
+
+            // Math shapes base coordinates and colors
+            let spherePositions = null;
+            let galaxyPositions = null;
+            let saturnPositions = null;
+            let lotusPositions = null;
+            let heartPositions = null;
+
+            let galaxyColors = null;
+            let saturnColors = null;
+            let lotusColors = null;
+            let heartColors = null;
+
+            let currentBasePositions = null;
+            let currentBaseColors = null;
+            let brightnessFactors = null;
+
+            // Jitter / Turbulence state variables
+            let prevHandX = null;
+            let prevHandY = null;
+            let targetTurbulence = 0.0;
+            let turbulenceAmount = 0.0;
             
             // Solid model variables
             let nailongSolidMesh = null;
@@ -332,6 +361,16 @@
                     return 2.0;
                 }
                 return 0.6 + (pinchDistance - 0.05) * (2.0 - 0.6) / (0.25 - 0.05);
+            }
+
+            function mapDualHandDistanceToScale(dist) {
+                if (dist < 0.16) {
+                    return 0.6;
+                }
+                if (dist > 0.68) {
+                    return 2.5;
+                }
+                return 0.6 + (dist - 0.16) * (2.5 - 0.6) / (0.68 - 0.16);
             }
 
             function updateControlReadout() {
@@ -741,17 +780,24 @@
             shapeButtons.forEach((button) => {
                 button.addEventListener('click', () => {
                     const shape = button.dataset.shape;
-                    if (shape === 'sphere') {
-                        setTargetShape('sphere');
-                    } else {
+                    if (shape === 'nailong' || shape === 'nailong_solid') {
                         if (nailongLoaded) {
                             setTargetShape(shape);
                         } else if (!isNailongLoading) {
                             loadAndSampleNailong(shape);
                         }
+                    } else {
+                        setTargetShape(shape);
                     }
                 });
             });
+
+            const colorPicker = document.getElementById('particle-color');
+            if (colorPicker) {
+                colorPicker.addEventListener('input', (event) => {
+                    precomputeShapes(event.target.value);
+                });
+            }
 
             function setTargetShape(shape) {
                 targetShape = shape;
@@ -975,33 +1021,290 @@
                 return color;
             }
 
-            function createParticleSphere({ count = 4200, radius = 2 }) {
+            function precomputeShapes(baseColorHex = "#00e5ff") {
+                const count = 4600;
+                
+                // 1. Initialize brightness factors if not already done
+                if (!brightnessFactors) {
+                    brightnessFactors = new Float32Array(count);
+                    for (let i = 0; i < count; i++) {
+                        brightnessFactors[i] = 0.82 + 0.32 * Math.random();
+                    }
+                }
+
+                // 2. Generate HSL gradient color stops from the color picker base color
+                const cBase = new THREE.Color(baseColorHex);
+                const tempHSL = {};
+                cBase.getHSL(tempHSL);
+                
+                const cCore = new THREE.Color().setHSL(tempHSL.h, Math.max(0.1, tempHSL.s - 0.25), Math.min(1.0, tempHSL.l + 0.35));
+                const cMid = cBase.clone();
+                const cEdge = new THREE.Color().setHSL((tempHSL.h + 0.12) % 1.0, tempHSL.s, Math.max(0.2, tempHSL.l - 0.1));
+                const cOuter = new THREE.Color().setHSL((tempHSL.h + 0.22) % 1.0, Math.min(1.0, tempHSL.s + 0.1), Math.max(0.05, tempHSL.l - 0.32));
+
+                function getGradientColor(t) {
+                    const color = new THREE.Color();
+                    if (t < 0.28) {
+                        color.lerpColors(cCore, cMid, t / 0.28);
+                    } else if (t < 0.72) {
+                        color.lerpColors(cMid, cEdge, (t - 0.28) / 0.44);
+                    } else {
+                        color.lerpColors(cEdge, cOuter, (t - 0.72) / 0.28);
+                    }
+                    return color;
+                }
+
+                // 3. Initialize positions if not already initialized
+                const initPositions = !spherePositions;
+                if (initPositions) {
+                    spherePositions = new Float32Array(count * 3);
+                    galaxyPositions = new Float32Array(count * 3);
+                    saturnPositions = new Float32Array(count * 3);
+                    lotusPositions = new Float32Array(count * 3);
+                    heartPositions = new Float32Array(count * 3);
+                }
+
+                // Initialize color arrays
+                sphereColors = new Float32Array(count * 3);
+                galaxyColors = new Float32Array(count * 3);
+                saturnColors = new Float32Array(count * 3);
+                lotusColors = new Float32Array(count * 3);
+                heartColors = new Float32Array(count * 3);
+
+                // Helper for Box-Muller Gaussian noise
+                function randomNormal() {
+                    let u = 0, v = 0;
+                    while (u === 0) u = Math.random();
+                    while (v === 0) v = Math.random();
+                    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+                }
+
+                for (let i = 0; i < count; i++) {
+                    const idx = i * 3;
+                    const bright = brightnessFactors[i];
+
+                    // ==================== SPHERE ====================
+                    if (initPositions) {
+                        const theta = Math.random() * Math.PI * 2;
+                        const u = Math.random() * 2 - 1;
+                        const shellBias = Math.random();
+                        const radius = 2.0 * (0.38 + 0.62 * Math.pow(shellBias, 0.28));
+                        const ring = Math.sqrt(1 - u * u);
+                        
+                        spherePositions[idx] = radius * ring * Math.cos(theta);
+                        spherePositions[idx + 1] = radius * u;
+                        spherePositions[idx + 2] = radius * ring * Math.sin(theta);
+                    }
+                    const sDist = Math.sqrt(
+                        spherePositions[idx]**2 + 
+                        spherePositions[idx + 1]**2 + 
+                        spherePositions[idx + 2]**2
+                    );
+                    const sColor = getGradientColor(sDist / 2.0).multiplyScalar(bright);
+                    sphereColors[idx] = sColor.r;
+                    sphereColors[idx + 1] = sColor.g;
+                    sphereColors[idx + 2] = sColor.b;
+
+                    // ==================== GALAXY ====================
+                    if (initPositions) {
+                        // 15% Core bulge, 85% Spiral arms
+                        if (i < count * 0.15) {
+                            const r = Math.random() * 0.5;
+                            const theta = Math.random() * Math.PI * 2;
+                            const u = Math.random() * 2 - 1;
+                            const ring = Math.sqrt(1 - u * u);
+                            
+                            galaxyPositions[idx] = r * ring * Math.cos(theta);
+                            galaxyPositions[idx + 1] = r * u * 0.5; // Flattened
+                            galaxyPositions[idx + 2] = r * ring * Math.sin(theta);
+                        } else {
+                            const arm = Math.random() < 0.5 ? 0 : 1;
+                            const t = Math.random();
+                            const theta = t * 8.0; // turns
+                            const r = 0.4 + 1.8 * t;
+                            const spread = 0.18 * (1.0 - 0.5 * t);
+                            const angle = theta + arm * Math.PI + randomNormal() * spread;
+                            
+                            galaxyPositions[idx] = r * Math.cos(angle) + randomNormal() * 0.06;
+                            galaxyPositions[idx + 1] = randomNormal() * 0.1 * (1.0 - t);
+                            galaxyPositions[idx + 2] = r * Math.sin(angle) + randomNormal() * 0.06;
+                        }
+                    }
+                    const gDist = Math.sqrt(
+                        galaxyPositions[idx]**2 + 
+                        galaxyPositions[idx + 1]**2 + 
+                        galaxyPositions[idx + 2]**2
+                    );
+                    const isCore = i < count * 0.15;
+                    const gColor = isCore 
+                        ? cCore.clone().lerp(cMid, Math.random() * 0.3).multiplyScalar(bright)
+                        : getGradientColor(gDist / 2.2).multiplyScalar(bright);
+                    galaxyColors[idx] = gColor.r;
+                    galaxyColors[idx + 1] = gColor.g;
+                    galaxyColors[idx + 2] = gColor.b;
+
+                    // ==================== SATURN ====================
+                    if (initPositions) {
+                        // 55% Planet sphere, 45% flat ring
+                        if (i < count * 0.55) {
+                            const theta = Math.random() * Math.PI * 2;
+                            const u = Math.random() * 2 - 1;
+                            const r = 1.0 * Math.pow(Math.random(), 0.3);
+                            const ring = Math.sqrt(1 - u * u);
+                            
+                            saturnPositions[idx] = r * ring * Math.cos(theta);
+                            saturnPositions[idx + 1] = r * u;
+                            saturnPositions[idx + 2] = r * ring * Math.sin(theta);
+                        } else {
+                            const r = 1.4 + 1.1 * Math.random();
+                            const theta = Math.random() * Math.PI * 2;
+                            const rx = r * Math.cos(theta) + randomNormal() * 0.03;
+                            const ry = randomNormal() * 0.02;
+                            const rz = r * Math.sin(theta) + randomNormal() * 0.03;
+                            
+                            // Tilt ring by 20 degrees around X-axis
+                            const cosTilt = Math.cos(0.35);
+                            const sinTilt = Math.sin(0.35);
+                            
+                            saturnPositions[idx] = rx;
+                            saturnPositions[idx + 1] = ry * cosTilt - rz * sinTilt;
+                            saturnPositions[idx + 2] = ry * sinTilt + rz * cosTilt;
+                        }
+                    }
+                    if (i < count * 0.55) {
+                        const pColor = cMid.clone().lerp(cCore, 0.25).multiplyScalar(bright);
+                        saturnColors[idx] = pColor.r;
+                        saturnColors[idx + 1] = pColor.g;
+                        saturnColors[idx + 2] = pColor.b;
+                    } else {
+                        const rColor = getGradientColor(0.3 + Math.random() * 0.5).multiplyScalar(bright);
+                        saturnColors[idx] = rColor.r;
+                        saturnColors[idx + 1] = rColor.g;
+                        saturnColors[idx + 2] = rColor.b;
+                    }
+
+                    // ==================== LOTUS ====================
+                    if (initPositions) {
+                        // 15% center pistil, 85% layered petals
+                        if (i < count * 0.15) {
+                            const r = Math.random() * 0.3;
+                            const theta = Math.random() * Math.PI * 2;
+                            const h = (Math.random() * 2 - 1) * 0.15;
+                            
+                            lotusPositions[idx] = r * Math.cos(theta);
+                            lotusPositions[idx + 1] = h - 0.5;
+                            lotusPositions[idx + 2] = r * Math.sin(theta);
+                        } else {
+                            const petalIdx = i % 4;
+                            const numPetals = [6, 10, 14, 18][petalIdx];
+                            const scale = [0.85, 1.25, 1.65, 2.05][petalIdx];
+                            const tilt = [0.25, 0.45, 0.70, 0.95][petalIdx];
+                            
+                            const pIndex = Math.floor(Math.random() * numPetals);
+                            const phi0 = (pIndex + (petalIdx % 2) * 0.5) * (Math.PI * 2 / numPetals);
+                            
+                            const u = Math.random();
+                            const v = Math.random() * 2 - 1;
+                            
+                            const w = 0.35 * Math.sin(Math.PI * u) * (1.0 - 0.25 * u);
+                            
+                            const lx = v * w * scale;
+                            const ly = u * 1.6 * scale;
+                            const lz = -0.22 * Math.sin(Math.PI * u) * scale;
+                            
+                            const cosT = Math.cos(tilt);
+                            const sinT = Math.sin(tilt);
+                            const ty = ly * cosT - lz * sinT;
+                            const tz = ly * sinT + lz * cosT;
+                            
+                            lotusPositions[idx] = lx * Math.cos(phi0) + tz * Math.sin(phi0);
+                            lotusPositions[idx + 1] = ty - 0.7;
+                            lotusPositions[idx + 2] = -lx * Math.sin(phi0) + tz * Math.cos(phi0);
+                        }
+                    }
+                    if (i < count * 0.15) {
+                        const pistilColor = new THREE.Color(0xffe066).multiplyScalar(bright);
+                        lotusColors[idx] = pistilColor.r;
+                        lotusColors[idx + 1] = pistilColor.g;
+                        lotusColors[idx + 2] = pistilColor.b;
+                    } else {
+                        const pColor = getGradientColor(0.1 + 0.8 * (i % 5 / 5)).multiplyScalar(bright);
+                        lotusColors[idx] = pColor.r;
+                        lotusColors[idx + 1] = pColor.g;
+                        lotusColors[idx + 2] = pColor.b;
+                    }
+
+                    // ==================== HEART ====================
+                    if (initPositions) {
+                        const theta = Math.random() * Math.PI * 2 - Math.PI;
+                        const phi = Math.random() * Math.PI - Math.PI / 2;
+                        
+                        const hx = 1.4 * Math.sin(theta)**3 * Math.cos(phi);
+                        const hy = (1.3 * Math.cos(theta) - 0.5 * Math.cos(2*theta) - 0.2 * Math.cos(3*theta) - 0.1 * Math.cos(4*theta)) * Math.cos(phi);
+                        const hz = 1.1 * Math.sin(phi) * (0.4 + 0.6 * Math.abs(Math.sin(theta)));
+                        
+                        const k = 0.22 + 0.78 * Math.pow(Math.random(), 0.5);
+                        
+                        heartPositions[idx] = hx * k;
+                        heartPositions[idx + 1] = hy * k + 0.3;
+                        heartPositions[idx + 2] = hz * k;
+                    }
+                    const hDist = Math.sqrt(
+                        heartPositions[idx]**2 + 
+                        heartPositions[idx + 1]**2 + 
+                        heartPositions[idx + 2]**2
+                    );
+                    const heartBaseColor = new THREE.Color(0xff0844);
+                    const heartEdgeColor = cMid.clone();
+                    const hColor = heartBaseColor.clone().lerp(heartEdgeColor, hDist / 1.8).multiplyScalar(bright);
+                    heartColors[idx] = hColor.r;
+                    heartColors[idx + 1] = hColor.g;
+                    heartColors[idx + 2] = hColor.b;
+                }
+            }
+
+            function getTargetPositionArray(shape) {
+                if (shape === 'galaxy') return galaxyPositions;
+                if (shape === 'saturn') return saturnPositions;
+                if (shape === 'lotus') return lotusPositions;
+                if (shape === 'heart') return heartPositions;
+                if (shape === 'nailong' || shape === 'nailong_solid') {
+                    return (nailongLoaded && nailongBasePositions) ? nailongBasePositions : spherePositions;
+                }
+                return spherePositions;
+            }
+
+            function getTargetColorArray(shape) {
+                if (shape === 'galaxy') return galaxyColors;
+                if (shape === 'saturn') return saturnColors;
+                if (shape === 'lotus') return lotusColors;
+                if (shape === 'heart') return heartColors;
+                if (shape === 'nailong' || shape === 'nailong_solid') {
+                    return (nailongLoaded && nailongColors) ? nailongColors : sphereColors;
+                }
+                return sphereColors;
+            }
+
+            function createParticleSphere({ count = 4600, radius = 2 }) {
+                precomputeShapes();
+
                 const geometry = new THREE.BufferGeometry();
                 const positions = new Float32Array(count * 3);
                 const colors = new Float32Array(count * 3);
                 const phases = new Float32Array(count);
 
+                currentBasePositions = new Float32Array(spherePositions);
+                currentBaseColors = new Float32Array(sphereColors);
+
                 for (let i = 0; i < count; i++) {
                     const pointIndex = i * 3;
-                    const theta = Math.random() * Math.PI * 2;
-                    const u = Math.random() * 2 - 1;
-                    const shellBias = Math.random();
-                    const particleRadius = radius * (0.38 + 0.62 * Math.pow(shellBias, 0.28));
-                    const ring = Math.sqrt(1 - u * u);
+                    positions[pointIndex] = spherePositions[pointIndex];
+                    positions[pointIndex + 1] = spherePositions[pointIndex + 1];
+                    positions[pointIndex + 2] = spherePositions[pointIndex + 2];
 
-                    const px = particleRadius * ring * Math.cos(theta);
-                    const py = particleRadius * u;
-                    const pz = particleRadius * ring * Math.sin(theta);
-
-                    positions[pointIndex] = px;
-                    positions[pointIndex + 1] = py;
-                    positions[pointIndex + 2] = pz;
-
-                    const dist = Math.sqrt(px*px + py*py + pz*pz);
-                    const color = getNebulaColor(dist, radius);
-                    colors[pointIndex] = color.r;
-                    colors[pointIndex + 1] = color.g;
-                    colors[pointIndex + 2] = color.b;
+                    colors[pointIndex] = sphereColors[pointIndex];
+                    colors[pointIndex + 1] = sphereColors[pointIndex + 1];
+                    colors[pointIndex + 2] = sphereColors[pointIndex + 2];
                     
                     phases[i] = Math.random() * Math.PI * 2;
                 }
@@ -1010,7 +1313,7 @@
                 geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
                 const material = new THREE.PointsMaterial({
-                    size: 0.065, // slightly larger size for textured soft particles
+                    size: 0.065,
                     sizeAttenuation: true,
                     map: createCircleTexture(),
                     vertexColors: true,
@@ -1020,8 +1323,6 @@
                     blending: THREE.AdditiveBlending,
                 });
 
-                particleBasePositions = new Float32Array(positions);
-                sphereColors = new Float32Array(colors);
                 particlePhases = phases;
                 particleMaterial = material;
                 return new THREE.Points(geometry, material);
@@ -1121,15 +1422,11 @@
                     const time = Date.now() * 0.001; // Convert to seconds
                     const pulseIntensity = 0.1 * Math.sin(time * 2) + 0.9; // Oscillate between 0.8 and 1.0
 
-                    // Smoothly morph between sphere and nailong shapes
-                    const morphSpeed = 0.05;
-                    if (targetShape === 'nailong' || targetShape === 'nailong_solid') {
-                        morphProgress = Math.min(1.0, morphProgress + morphSpeed);
-                    } else {
-                        morphProgress = Math.max(0.0, morphProgress - morphSpeed);
-                    }
+                    // Smoothly update sphereWeight (fading wireframe and volume out when morphing away from sphere)
+                    const targetSphereWeight = (targetShape === 'sphere') ? 1.0 : 0.0;
+                    sphereWeight += (targetSphereWeight - sphereWeight) * 0.08;
 
-                    // Handle solid model opacity transitions
+                    // Handle solid model opacity transitions for Nailong Solid
                     if (targetShape === 'nailong_solid') {
                         solidOpacity = Math.min(1.0, solidOpacity + 0.05);
                     } else {
@@ -1142,70 +1439,78 @@
                         nailongSolidMaterial.transparent = (solidOpacity < 0.99);
                     }
 
-                    if (particleMesh && particleBasePositions && particlePhases) {
+                    // Smoothly morph between shapes
+                    const morphSpeed = 0.06;
+                    const targetPosArr = getTargetPositionArray(targetShape);
+                    const targetColArr = getTargetColorArray(targetShape);
+
+                    // Interpolate turbulence Amount
+                    turbulenceAmount += (targetTurbulence - turbulenceAmount) * 0.1;
+                    targetTurbulence *= 0.92; // continuous decay of target turbulence
+
+                    // Pinch-driven/dual-hand-driven diffusion factor
+                    const diffusion = 1.0 + clamp((currentSphereSize - 1.0) * 0.35, -0.3, 0.65);
+
+                    if (particleMesh && currentBasePositions && currentBaseColors && particlePhases) {
                         const positions = particleMesh.geometry.attributes.position.array;
                         const colorsAttr = particleMesh.geometry.attributes.color.array;
-                        const hasNailong = nailongLoaded && nailongBasePositions && nailongColors;
 
                         for (let i = 0; i < particlePhases.length; i++) {
                             const pointIndex = i * 3;
-                            const sx = particleBasePositions[pointIndex];
-                            const sy = particleBasePositions[pointIndex + 1];
-                            const sz = particleBasePositions[pointIndex + 2];
-                            
-                            let nx = sx;
-                            let ny = sy;
-                            let nz = sz;
-                            if (hasNailong) {
-                                nx = nailongBasePositions[pointIndex];
-                                ny = nailongBasePositions[pointIndex + 1];
-                                nz = nailongBasePositions[pointIndex + 2];
-                            }
-                            
-                            const bx = sx + (nx - sx) * morphProgress;
-                            const by = sy + (ny - sy) * morphProgress;
-                            const bz = sz + (nz - sz) * morphProgress;
 
-                            const wave = 1 + 0.035 * Math.sin(time * 2.2 + particlePhases[i]);
-                            positions[pointIndex] = bx * wave;
-                            positions[pointIndex + 1] = by * wave;
-                            positions[pointIndex + 2] = bz * wave;
+                            // 1. Morph base positions
+                            currentBasePositions[pointIndex] += (targetPosArr[pointIndex] - currentBasePositions[pointIndex]) * morphSpeed;
+                            currentBasePositions[pointIndex + 1] += (targetPosArr[pointIndex + 1] - currentBasePositions[pointIndex + 1]) * morphSpeed;
+                            currentBasePositions[pointIndex + 2] += (targetPosArr[pointIndex + 2] - currentBasePositions[pointIndex + 2]) * morphSpeed;
 
-                            // Interpolate colors dynamically
-                            const sr = sphereColors[pointIndex];
-                            const sg = sphereColors[pointIndex + 1];
-                            const sb = sphereColors[pointIndex + 2];
+                            // 2. Morph base colors
+                            currentBaseColors[pointIndex] += (targetColArr[pointIndex] - currentBaseColors[pointIndex]) * morphSpeed;
+                            currentBaseColors[pointIndex + 1] += (targetColArr[pointIndex + 1] - currentBaseColors[pointIndex + 1]) * morphSpeed;
+                            currentBaseColors[pointIndex + 2] += (targetColArr[pointIndex + 2] - currentBaseColors[pointIndex + 2]) * morphSpeed;
+
+                            const bx = currentBasePositions[pointIndex];
+                            const by = currentBasePositions[pointIndex + 1];
+                            const bz = currentBasePositions[pointIndex + 2];
+
+                            // 3. Compute breathing wave
+                            const wave = 1.0 + 0.035 * Math.sin(time * 2.2 + particlePhases[i]);
+
+                            // 4. Compute high-frequency turbulence noise
+                            const noiseFreq = 4.0;
+                            const noiseSpeed = time * 7.5;
+                            const phase = particlePhases[i];
+                            const noiseX = Math.sin(by * noiseFreq + noiseSpeed + phase) * Math.cos(bz * noiseFreq + noiseSpeed);
+                            const noiseY = Math.sin(bz * noiseFreq + noiseSpeed + phase) * Math.cos(bx * noiseFreq + noiseSpeed);
+                            const noiseZ = Math.sin(bx * noiseFreq + noiseSpeed + phase) * Math.cos(by * noiseFreq + noiseSpeed);
                             
-                            let nr = sr;
-                            let ng = sg;
-                            let nb = sb;
-                            if (hasNailong) {
-                                nr = nailongColors[pointIndex];
-                                ng = nailongColors[pointIndex + 1];
-                                nb = nailongColors[pointIndex + 2];
-                            }
+                            const jitterStrength = 0.26 * turbulenceAmount;
 
-                            colorsAttr[pointIndex] = sr + (nr - sr) * morphProgress;
-                            colorsAttr[pointIndex + 1] = sg + (ng - sg) * morphProgress;
-                            colorsAttr[pointIndex + 2] = sb + (nb - sb) * morphProgress;
+                            // Apply final coordinates
+                            positions[pointIndex] = bx * wave * diffusion + noiseX * jitterStrength;
+                            positions[pointIndex + 1] = by * wave * diffusion + noiseY * jitterStrength;
+                            positions[pointIndex + 2] = bz * wave * diffusion + noiseZ * jitterStrength;
+
+                            // Apply final colors
+                            colorsAttr[pointIndex] = currentBaseColors[pointIndex];
+                            colorsAttr[pointIndex + 1] = currentBaseColors[pointIndex + 1];
+                            colorsAttr[pointIndex + 2] = currentBaseColors[pointIndex + 2];
                         }
                         particleMesh.geometry.attributes.position.needsUpdate = true;
                         particleMesh.geometry.attributes.color.needsUpdate = true;
 
-                        // Smoothly fade particles out when solidification happens
+                        // Smoothly fade particles out when solidification happens (nailong_solid)
                         const targetParticleOpacity = (targetShape === 'nailong_solid') ? 0.0 : (0.74 + 0.16 * pulseIntensity);
                         particleMesh.material.opacity += (targetParticleOpacity - particleMesh.material.opacity) * 0.1;
                     }
                     
-                    // Fade out wireframe and solid volume as we morph to nailong
-                    const fadeFactor = Math.max(morphProgress, solidOpacity);
+                    // Fade out wireframe and solid volume as we morph away from sphere
                     if (wireframeMesh && wireframeMesh.material) {
-                        wireframeMesh.material.opacity = (1 - fadeFactor) * 0.18;
-                        wireframeMesh.visible = (fadeFactor < 0.99);
+                        wireframeMesh.material.opacity = sphereWeight * 0.18;
+                        wireframeMesh.visible = (sphereWeight > 0.01);
                     }
                     if (solidMesh && solidMesh.material) {
-                        solidMesh.material.opacity = (1 - fadeFactor) * (0.035 + 0.035 * pulseIntensity);
-                        solidMesh.visible = (fadeFactor < 0.99);
+                        solidMesh.material.opacity = sphereWeight * (0.035 + 0.035 * pulseIntensity);
+                        solidMesh.visible = (sphereWeight > 0.01);
                     }
                 }
 
@@ -1447,7 +1752,7 @@
                         const handedness = results.multiHandedness[0].label;
                         const isLeft = handedness === 'Left';
                         
-                        // Draw hand (Cyan color by default for single hand control)
+                        // Draw hand
                         drawLandmarks(landmarks, isLeft);
                         
                         // 1. Rotation control
@@ -1467,7 +1772,18 @@
                         controlState.gesture = isLeft ? 'left_hand_pinch' : 'right_hand_pinch';
                         controlState.lastMessageAt = Date.now();
                         
-                        // 3. Touch color trigger
+                        // 3. Track speed for turbulence using middle finger MCP (landmark 9)
+                        const wrist = landmarks[9];
+                        if (prevHandX !== null && prevHandY !== null) {
+                            const dx = wrist.x - prevHandX;
+                            const dy = wrist.y - prevHandY;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            targetTurbulence = Math.min(1.0, dist * 16.0);
+                        }
+                        prevHandX = wrist.x;
+                        prevHandY = wrist.y;
+
+                        // 4. Touch color trigger
                         if (isPointInSphere(indexTip)) {
                             const currentTime = Date.now();
                             if (currentTime - lastColorChangeTime > colorChangeDelay) {
@@ -1479,7 +1795,7 @@
                             }
                         }
                     } else {
-                        // DUAL HAND MODE: Right hand controls rotation and scale, Left hand controls color touch
+                        // DUAL HAND MODE: Right and Left hands
                         let rightHandLandmarks = null;
                         let leftHandLandmarks = null;
                         
@@ -1497,8 +1813,38 @@
                             }
                         }
                         
-                        // If we found a Right hand, use it to control rotation & scaling
-                        if (rightHandLandmarks) {
+                        if (rightHandLandmarks && leftHandLandmarks) {
+                            // DUAL HANDS DETECTED: use the distance between the two hands for scaling/diffusion!
+                            const leftCenter = leftHandLandmarks[9];
+                            const rightCenter = rightHandLandmarks[9];
+                            const handDistance = calculateDistance(leftCenter, rightCenter);
+                            
+                            controlState.targetScale = mapDualHandDistanceToScale(handDistance);
+                            controlState.pinchDistance = handDistance;
+                            controlState.gesture = 'dual_hand_stretch';
+                            controlState.motion = true;
+                            controlState.lastMessageAt = Date.now();
+                            
+                            // Rotate based on right hand
+                            const handRotation = calculateHandRotation(rightHandLandmarks);
+                            controlState.handRotX = handRotation.x;
+                            controlState.handRotY = handRotation.y;
+                            controlState.handRotZ = handRotation.z;
+                            
+                            // Track speed of right hand for turbulence
+                            const wrist = rightHandLandmarks[9];
+                            if (prevHandX !== null && prevHandY !== null) {
+                                const dx = wrist.x - prevHandX;
+                                const dy = wrist.y - prevHandY;
+                                const dist = Math.sqrt(dx * dx + dy * dy);
+                                targetTurbulence = Math.min(1.0, dist * 16.0);
+                            }
+                            prevHandX = wrist.x;
+                            prevHandY = wrist.y;
+                            rightHandActive = true;
+                            leftHandActive = true;
+                        } else if (rightHandLandmarks) {
+                            // Only Right hand
                             const handRotation = calculateHandRotation(rightHandLandmarks);
                             controlState.handRotX = handRotation.x;
                             controlState.handRotY = handRotation.y;
@@ -1509,32 +1855,59 @@
                             const pinchDistance = calculateDistance(thumbTip, indexTip);
                             
                             controlState.targetScale = mapPinchDistanceToScale(pinchDistance);
+                            controlState.pinchDistance = pinchDistance;
                             controlState.motion = true;
                             controlState.area = pinchDistance * 100000;
                             controlState.gesture = 'right_hand_pinch';
                             controlState.lastMessageAt = Date.now();
-                            rightHandActive = true;
-                        }
-                        
-                        // If we found a Left hand, check if it touches the sphere to trigger color changes
-                        if (leftHandLandmarks) {
-                            const indexTip = leftHandLandmarks[8];
-                            if (isPointInSphere(indexTip)) {
-                                const currentTime = Date.now();
-                                if (currentTime - lastColorChangeTime > colorChangeDelay) {
-                                    const newColor = getRandomNeonColor();
-                                    if (solidMesh && solidMesh.material) {
-                                        solidMesh.material.color.setHex(newColor);
-                                    }
-                                    leftHandActive = true;
-                                }
-                                lastColorChangeTime = currentTime;
+                            
+                            // Track speed
+                            const wrist = rightHandLandmarks[9];
+                            if (prevHandX !== null && prevHandY !== null) {
+                                const dx = wrist.x - prevHandX;
+                                const dy = wrist.y - prevHandY;
+                                const dist = Math.sqrt(dx * dx + dy * dy);
+                                targetTurbulence = Math.min(1.0, dist * 16.0);
                             }
+                            prevHandX = wrist.x;
+                            prevHandY = wrist.y;
+                            rightHandActive = true;
+                        } else if (leftHandLandmarks) {
+                            // Only Left hand
+                            const handRotation = calculateHandRotation(leftHandLandmarks);
+                            controlState.handRotX = handRotation.x;
+                            controlState.handRotY = handRotation.y;
+                            controlState.handRotZ = handRotation.z;
+                            
+                            const thumbTip = leftHandLandmarks[4];
+                            const indexTip = leftHandLandmarks[8];
+                            const pinchDistance = calculateDistance(thumbTip, indexTip);
+                            
+                            controlState.targetScale = mapPinchDistanceToScale(pinchDistance);
+                            controlState.pinchDistance = pinchDistance;
+                            controlState.motion = true;
+                            controlState.area = pinchDistance * 100000;
+                            controlState.gesture = 'left_hand_pinch';
+                            controlState.lastMessageAt = Date.now();
+                            
+                            // Track speed
+                            const wrist = leftHandLandmarks[9];
+                            if (prevHandX !== null && prevHandY !== null) {
+                                const dx = wrist.x - prevHandX;
+                                const dy = wrist.y - prevHandY;
+                                const dist = Math.sqrt(dx * dx + dy * dy);
+                                targetTurbulence = Math.min(1.0, dist * 16.0);
+                            }
+                            prevHandX = wrist.x;
+                            prevHandY = wrist.y;
+                            leftHandActive = true;
                         }
                     }
                 } else {
                     statusElement.textContent = 'No hands detected';
                     controlState.handDetected = false;
+                    prevHandX = null;
+                    prevHandY = null;
                 }
             }
             
