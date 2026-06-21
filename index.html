@@ -31,6 +31,21 @@
             height: 100%;
             object-fit: cover;
             transform: scaleX(-1); /* Mirror the webcam feed */
+            z-index: 0;
+        }
+
+        #raspberry-video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: center center;
+            display: none;
+            background: #000;
+            opacity: 0.62;
+            z-index: 0;
+            pointer-events: none;
         }
         
         #canvas {
@@ -41,6 +56,7 @@
             height: 100%;
             transform: scaleX(-1); /* Mirror the canvas to match webcam */
             pointer-events: none;
+            z-index: 6;
         }
         
         #three-canvas {
@@ -65,6 +81,76 @@
             z-index: 10;
         }
 
+        #control-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: min(320px, calc(100vw - 40px));
+            color: #fff;
+            background-color: rgba(0, 0, 0, 0.55);
+            padding: 12px;
+            border-radius: 6px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            z-index: 10;
+        }
+
+        .mode-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .control-mode-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin: 8px 0;
+        }
+
+        .mode-buttons button,
+        .control-mode-buttons button,
+        #connect-raspberry {
+            min-height: 34px;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: 4px;
+            color: #fff;
+            background: rgba(255, 255, 255, 0.12);
+            cursor: pointer;
+        }
+
+        .mode-buttons button.active {
+            color: #000;
+            background: #00ffff;
+            border-color: #00ffff;
+        }
+
+        .control-mode-buttons button.active {
+            color: #000;
+            background: #39ff14;
+            border-color: #39ff14;
+        }
+
+        #ws-url,
+        #mjpeg-url {
+            box-sizing: border-box;
+            width: 100%;
+            height: 34px;
+            margin-bottom: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: 4px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.35);
+            padding: 0 8px;
+        }
+
+        #control-readout {
+            margin-top: 8px;
+            line-height: 1.5;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
         #links-para{
             position: absolute;
             bottom: 5px;
@@ -83,9 +169,26 @@
 <body>
     <div class="container">
         <video id="webcam" autoplay playsinline></video>
+        <img id="raspberry-video" alt="">
         <canvas id="canvas"></canvas>
         <div id="three-canvas"></div>
         <div id="status">Loading MediaPipe...</div>
+        <div id="control-panel">
+            <div class="mode-buttons">
+                <button type="button" data-mode="browser" class="active">Browser</button>
+                <button type="button" data-mode="raspberry">Raspberry</button>
+                <button type="button" data-mode="simulate">Simulate</button>
+            </div>
+            <input id="ws-url" value="ws://10.196.36.213:8765" aria-label="WebSocket URL">
+            <input id="mjpeg-url" value="http://10.196.36.213:8080/video" aria-label="MJPEG URL">
+            <button id="connect-raspberry" type="button">Connect</button>
+            <div class="control-mode-buttons">
+                <button type="button" data-control-mode="area" class="active">Area</button>
+                <button type="button" data-control-mode="pinch">Pinch</button>
+                <button type="button" data-control-mode="hybrid">Hybrid</button>
+            </div>
+            <div id="control-readout"></div>
+        </div>
     </div>
 
     <p id="links-para"><a href="https://x.com/measure_plan" target="_blank">Twitter</a> | <a href="https://www.instagram.com/stereo.drift/" target="_blank">Instagram</a> | <a href="https://github.com/collidingScopes/threejs-handtracking-101" target="_blank">Source Code</a> | <a href="https://buymeacoffee.com/stereodrift" target="_blank">❤️</a></p>
@@ -97,14 +200,23 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const videoElement = document.getElementById('webcam');
+            const raspberryVideoElement = document.getElementById('raspberry-video');
             const canvasElement = document.getElementById('canvas');
             const canvasCtx = canvasElement.getContext('2d');
             const statusElement = document.getElementById('status');
             const threeContainer = document.getElementById('three-canvas');
+            const controlReadout = document.getElementById('control-readout');
+            const wsUrlInput = document.getElementById('ws-url');
+            const mjpegUrlInput = document.getElementById('mjpeg-url');
+            const connectButton = document.getElementById('connect-raspberry');
+            const modeButtons = document.querySelectorAll('[data-mode]');
+            const controlModeButtons = document.querySelectorAll('[data-control-mode]');
             
             // Three.js variables
             let scene, camera, renderer;
-            let sphere, solidMesh, wireframeMesh;
+            let sphere, solidMesh, wireframeMesh, particleMesh, particleMaterial;
+            let particleBasePositions = null;
+            let particlePhases = null;
             
             // Hand tracking variables
             let rightHandActive = false;
@@ -112,8 +224,249 @@
             let lastColorChangeTime = 0;
             const colorChangeDelay = 500; // milliseconds
             let currentSphereSize = 1.0; // Default/starting size
-            let targetSphereSize = 1.0;  // Target size based on hand gesture
             const smoothingFactor = 0.15; // Adjust this value between 0-1 (lower = smoother but slower)
+            let raspberrySocket = null;
+            let simulationTimer = null;
+            let mediaPipeHands = null;
+            let mediaPipeCamera = null;
+            let browserCameraRunning = false;
+            let browserStartToken = 0;
+
+            const controlState = {
+                source: 'browser',
+                targetScale: 1.0,
+                rotateX: 0,
+                rotateY: 0,
+                motion: false,
+                area: 0,
+                gesture: 'none',
+                handDetected: false,
+                landmarkCount: 0,
+                pinchDistance: 0,
+                landmarks: [],
+                controlMode: 'area',
+                connected: false,
+                lastMessageAt: 0
+            };
+
+            function clamp(value, min, max) {
+                return Math.min(Math.max(value, min), max);
+            }
+
+            function mapPinchDistanceToScale(pinchDistance) {
+                if (pinchDistance < 0.05) {
+                    return 0.6;
+                }
+                if (pinchDistance > 0.25) {
+                    return 2.0;
+                }
+                return 0.6 + (pinchDistance - 0.05) * (2.0 - 0.6) / (0.25 - 0.05);
+            }
+
+            function updateControlReadout() {
+                const connectedText = controlState.connected ? 'yes' : 'no';
+                const messageAge = controlState.lastMessageAt
+                    ? `${((Date.now() - controlState.lastMessageAt) / 1000).toFixed(1)}s`
+                    : '-';
+
+                controlReadout.innerHTML = [
+                    `source: ${controlState.source}`,
+                    `control: ${controlState.controlMode}`,
+                    `targetScale: ${controlState.targetScale.toFixed(2)}`,
+                    `currentScale: ${currentSphereSize.toFixed(2)}`,
+                    `motion: ${controlState.motion}`,
+                    `area: ${Math.round(controlState.area)}`,
+                    `hand: ${controlState.handDetected}`,
+                    `landmarks: ${controlState.landmarkCount}`,
+                    `pinch: ${controlState.pinchDistance.toFixed(3)}`,
+                    `ws connected: ${connectedText}`,
+                    `last message: ${messageAge}`
+                ].join('<br>');
+            }
+
+            async function setMode(mode) {
+                controlState.source = mode;
+                modeButtons.forEach((button) => {
+                    button.classList.toggle('active', button.dataset.mode === mode);
+                });
+
+                if (mode === 'browser') {
+                    stopSimulation();
+                    disconnectRaspberrySocket();
+                    stopRaspberryVideo();
+                    await startBrowserCamera();
+                } else {
+                    stopBrowserCamera();
+                }
+
+                if (mode === 'simulate') {
+                    disconnectRaspberrySocket();
+                    startSimulation();
+                }
+                if (mode !== 'simulate') {
+                    stopSimulation();
+                }
+
+                if (mode === 'raspberry') {
+                    canvasElement.style.display = 'block';
+                    canvasElement.style.transform = 'none';
+                    startRaspberryVideo();
+                    statusElement.textContent = 'Raspberry mode ready';
+                }
+            }
+
+            function setControlMode(mode) {
+                controlState.controlMode = mode;
+                controlModeButtons.forEach((button) => {
+                    button.classList.toggle('active', button.dataset.controlMode === mode);
+                });
+            }
+
+            function applyRaspberryControl(data) {
+                controlState.source = 'raspberry';
+                const areaScale = clamp(Number(data.scale ?? controlState.targetScale), 0.6, 2.5);
+                const pinchDistance = Number(data.pinchDistance ?? 0);
+                const pinchScale = clamp(mapPinchDistanceToScale(pinchDistance), 0.6, 2.5);
+                controlState.rotateX = Number(data.rotateX ?? 0);
+                controlState.rotateY = Number(data.rotateY ?? 0);
+                controlState.motion = Boolean(data.motion);
+                controlState.area = Number(data.area ?? 0);
+                controlState.gesture = data.gesture || 'single_hand_area';
+                controlState.handDetected = Boolean(data.handDetected);
+                controlState.landmarkCount = Number(data.landmarkCount ?? 0);
+                controlState.pinchDistance = pinchDistance;
+                controlState.landmarks = Array.isArray(data.landmarks) ? data.landmarks : [];
+                if (controlState.controlMode === 'pinch') {
+                    if (controlState.handDetected && controlState.landmarkCount >= 9) {
+                        controlState.targetScale = pinchScale;
+                    }
+                } else if (controlState.controlMode === 'hybrid') {
+                    controlState.targetScale = controlState.handDetected && controlState.landmarkCount >= 9
+                        ? pinchScale
+                        : areaScale;
+                } else {
+                    controlState.targetScale = areaScale;
+                }
+                controlState.lastMessageAt = Date.now();
+                drawRaspberryLandmarks();
+            }
+
+            function connectRaspberrySocket() {
+                if (raspberrySocket) {
+                    raspberrySocket.close();
+                    raspberrySocket = null;
+                }
+
+                setMode('raspberry');
+                const socket = new WebSocket(wsUrlInput.value);
+                raspberrySocket = socket;
+                statusElement.textContent = 'Connecting to Raspberry Pi...';
+
+                socket.addEventListener('open', () => {
+                    if (raspberrySocket !== socket || controlState.source !== 'raspberry') {
+                        return;
+                    }
+                    controlState.connected = true;
+                    statusElement.textContent = 'Raspberry Pi connected';
+                });
+
+                socket.addEventListener('message', (event) => {
+                    if (raspberrySocket !== socket || controlState.source !== 'raspberry') {
+                        return;
+                    }
+
+                    try {
+                        applyRaspberryControl(JSON.parse(event.data));
+                    } catch (error) {
+                        console.error('Invalid Raspberry Pi message:', event.data, error);
+                    }
+                });
+
+                socket.addEventListener('close', () => {
+                    if (raspberrySocket !== socket) {
+                        return;
+                    }
+
+                    controlState.connected = false;
+                    if (controlState.source === 'raspberry') {
+                        statusElement.textContent = 'Raspberry Pi disconnected';
+                    }
+                });
+
+                socket.addEventListener('error', () => {
+                    if (raspberrySocket !== socket) {
+                        return;
+                    }
+
+                    controlState.connected = false;
+                    if (controlState.source === 'raspberry') {
+                        statusElement.textContent = 'Raspberry Pi connection error';
+                    }
+                });
+            }
+
+            function disconnectRaspberrySocket() {
+                if (!raspberrySocket) {
+                    controlState.connected = false;
+                    return;
+                }
+
+                raspberrySocket.close();
+                raspberrySocket = null;
+                controlState.connected = false;
+            }
+
+            function startRaspberryVideo() {
+                raspberryVideoElement.src = '';
+                raspberryVideoElement.style.display = 'block';
+                raspberryVideoElement.src = mjpegUrlInput.value;
+            }
+
+            function stopRaspberryVideo() {
+                raspberryVideoElement.removeAttribute('src');
+                raspberryVideoElement.src = '';
+                raspberryVideoElement.style.display = 'none';
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            }
+
+            function startSimulation() {
+                stopSimulation();
+                stopRaspberryVideo();
+                let phase = 0;
+                simulationTimer = window.setInterval(() => {
+                    phase += 0.12;
+                    controlState.targetScale = 1.1 + Math.sin(phase) * 0.8;
+                    controlState.rotateY = Math.cos(phase) * 0.01;
+                    controlState.motion = true;
+                    controlState.area = 8000 + Math.max(0, Math.sin(phase)) * 12000;
+                    controlState.gesture = 'simulated_single_hand_area';
+                    controlState.lastMessageAt = Date.now();
+                    statusElement.textContent = 'Simulation mode';
+                }, 60);
+            }
+
+            function stopSimulation() {
+                if (simulationTimer) {
+                    window.clearInterval(simulationTimer);
+                    simulationTimer = null;
+                }
+            }
+
+            modeButtons.forEach((button) => {
+                button.addEventListener('click', () => setMode(button.dataset.mode));
+            });
+            controlModeButtons.forEach((button) => {
+                button.addEventListener('click', () => setControlMode(button.dataset.controlMode));
+            });
+            connectButton.addEventListener('click', connectRaspberrySocket);
+            window.addEventListener('pagehide', () => {
+                disconnectRaspberrySocket();
+                stopRaspberryVideo();
+            });
+            window.addEventListener('beforeunload', () => {
+                disconnectRaspberrySocket();
+                stopRaspberryVideo();
+            });
 
             // Keep canvas size in sync with window size
             function updateCanvasSize() {
@@ -136,13 +489,21 @@
                     camera.aspect = window.innerWidth / window.innerHeight;
                     camera.updateProjectionMatrix();
                 }
+                if (controlState.source === 'raspberry') {
+                    drawRaspberryLandmarks();
+                }
             });
             
             // Set initial layout
             initializeLayout();
             
-            // Initialize webcam
-            async function initWebcam() {
+            async function startBrowserCamera() {
+                const startToken = ++browserStartToken;
+                videoElement.style.display = 'block';
+                canvasElement.style.display = 'block';
+                canvasElement.style.transform = 'scaleX(-1)';
+                statusElement.textContent = 'Starting browser camera...';
+
                 try {
                     // Try to get a high resolution stream
                     const stream = await navigator.mediaDevices.getUserMedia({
@@ -152,21 +513,90 @@
                             facingMode: 'user'
                         }
                     });
+
+                    if (startToken !== browserStartToken || controlState.source !== 'browser') {
+                        stream.getTracks().forEach((track) => track.stop());
+                        return;
+                    }
                     
                     videoElement.srcObject = stream;
                     
-                    return new Promise((resolve) => {
+                    await new Promise((resolve) => {
                         videoElement.onloadedmetadata = () => {
                             // Ensure layout is updated when video loads
                             initializeLayout();
                             resolve(videoElement);
                         };
                     });
+
+                    if (startToken !== browserStartToken || controlState.source !== 'browser') {
+                        stopBrowserCamera();
+                        return;
+                    }
+
+                    if (!mediaPipeHands) {
+                        const hands = await initMediaPipeHands();
+                        if (!hands) {
+                            return;
+                        }
+                        mediaPipeHands = hands;
+                        mediaPipeHands.onResults(onResults);
+                    }
+
+                    if (startToken !== browserStartToken || controlState.source !== 'browser' || !mediaPipeHands) {
+                        stopBrowserCamera();
+                        return;
+                    }
+
+                    if (mediaPipeCamera) {
+                        mediaPipeCamera.stop();
+                    }
+
+                    mediaPipeCamera = new Camera(videoElement, {
+                        onFrame: async () => {
+                            if (controlState.source !== 'browser' || !mediaPipeHands) {
+                                return;
+                            }
+                            await mediaPipeHands.send({image: videoElement});
+                        },
+                        width: 1920,
+                        height: 1080
+                    });
+
+                    mediaPipeCamera.start();
+                    browserCameraRunning = true;
+                    statusElement.textContent = 'Browser camera ready';
                 } catch (error) {
-                    statusElement.textContent = `Error accessing webcam: ${error.message}`;
+                    if (controlState.source === 'browser') {
+                        statusElement.textContent = `Error accessing webcam: ${error.message}`;
+                    }
                     console.error('Error accessing webcam:', error);
-                    throw error;
                 }
+            }
+
+            function stopBrowserCamera() {
+                browserStartToken++;
+
+                if (mediaPipeCamera) {
+                    try {
+                        mediaPipeCamera.stop();
+                    } catch (error) {
+                        console.warn('Error stopping MediaPipe camera:', error);
+                    }
+                    mediaPipeCamera = null;
+                }
+
+                if (videoElement.srcObject) {
+                    videoElement.srcObject.getTracks().forEach((track) => track.stop());
+                    videoElement.srcObject = null;
+                }
+
+                browserCameraRunning = false;
+                rightHandActive = false;
+                leftHandActive = false;
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                videoElement.style.display = 'none';
+                canvasElement.style.display = 'none';
             }
             
             // Helper function to generate random neon colors
@@ -182,6 +612,58 @@
                     0xFFFF00  // Yellow
                 ];
                 return neonColors[Math.floor(Math.random() * neonColors.length)];
+            }
+
+            function createParticleSphere({ count = 4200, radius = 2 }) {
+                const geometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(count * 3);
+                const colors = new Float32Array(count * 3);
+                const phases = new Float32Array(count);
+                const palette = [
+                    new THREE.Color(0x00ffff),
+                    new THREE.Color(0x39ff14),
+                    new THREE.Color(0xffffff),
+                    new THREE.Color(0x66ffcc),
+                    new THREE.Color(0xff4fd8),
+                ];
+
+                for (let i = 0; i < count; i++) {
+                    const pointIndex = i * 3;
+                    const theta = Math.random() * Math.PI * 2;
+                    const u = Math.random() * 2 - 1;
+                    const shellBias = Math.random();
+                    const particleRadius = radius * (0.38 + 0.62 * Math.pow(shellBias, 0.28));
+                    const ring = Math.sqrt(1 - u * u);
+
+                    positions[pointIndex] = particleRadius * ring * Math.cos(theta);
+                    positions[pointIndex + 1] = particleRadius * u;
+                    positions[pointIndex + 2] = particleRadius * ring * Math.sin(theta);
+
+                    const color = palette[Math.floor(Math.random() * palette.length)].clone();
+                    color.multiplyScalar(0.65 + Math.random() * 0.55);
+                    colors[pointIndex] = color.r;
+                    colors[pointIndex + 1] = color.g;
+                    colors[pointIndex + 2] = color.b;
+                    phases[i] = Math.random() * Math.PI * 2;
+                }
+
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+                const material = new THREE.PointsMaterial({
+                    size: 0.035,
+                    sizeAttenuation: true,
+                    vertexColors: true,
+                    transparent: true,
+                    opacity: 0.88,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending,
+                });
+
+                particleBasePositions = new Float32Array(positions);
+                particlePhases = phases;
+                particleMaterial = material;
+                return new THREE.Points(geometry, material);
             }
             
             // Initialize Three.js
@@ -207,26 +689,31 @@
                 renderer.setClearColor(0x000000, 0); // Transparent background
                 threeContainer.appendChild(renderer.domElement);
                 
-                // Create a sphere with vibrant neon color fill and white wireframe
+                // Create a particle sphere with a faint wireframe shell.
                 const geometry = new THREE.SphereGeometry(2, 32, 32);
                 
-                // Create a group to hold both the solid and wireframe meshes
+                // Create a group to hold the particle cloud and wireframe shell.
                 sphere = new THREE.Group();
-                
-                // Create solid mesh with neon color and slight transparency
+
+                particleMesh = createParticleSphere({ count: 4600, radius: 2 });
+                sphere.add(particleMesh);
+
+                // Keep a subtle transparent fill to make the volume readable on camera backgrounds.
                 const solidMaterial = new THREE.MeshBasicMaterial({ 
-                    color: 0xff00ff,  // Initial color
+                    color: 0x00ffff,
                     transparent: true,
-                    opacity: 0.5
+                    opacity: 0.06,
+                    depthWrite: false
                 });
                 solidMesh = new THREE.Mesh(geometry, solidMaterial);
                 sphere.add(solidMesh);
                 
-                // Create wireframe mesh with white color
+                // Create faint wireframe mesh with cyan-white color.
                 const wireframeMaterial = new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
+                    color: 0xcfffff,
                     wireframe: true,
-                    transparent: false,
+                    transparent: true,
+                    opacity: 0.18,
                 });
                 wireframeMesh = new THREE.Mesh(geometry, wireframeMaterial);
                 sphere.add(wireframeMesh);
@@ -246,20 +733,38 @@
                 
                 // Rotate the sphere continuously, regardless of hand interaction
                 if (sphere) {
+                    currentSphereSize = currentSphereSize + (controlState.targetScale - currentSphereSize) * smoothingFactor;
+                    sphere.scale.set(currentSphereSize, currentSphereSize, currentSphereSize);
+
                     // Remove the condition that stops rotation during hand interaction
-                    sphere.rotation.x += 0.003;
-                    sphere.rotation.y += 0.008;
+                    sphere.rotation.x += 0.003 + controlState.rotateX;
+                    sphere.rotation.y += 0.008 + controlState.rotateY;
                     
                     // Add pulsing glow effect to the neon fill
                     const time = Date.now() * 0.001; // Convert to seconds
                     const pulseIntensity = 0.1 * Math.sin(time * 2) + 0.9; // Oscillate between 0.8 and 1.0
+
+                    if (particleMesh && particleBasePositions && particlePhases) {
+                        const positions = particleMesh.geometry.attributes.position.array;
+                        for (let i = 0; i < particlePhases.length; i++) {
+                            const pointIndex = i * 3;
+                            const wave = 1 + 0.035 * Math.sin(time * 2.2 + particlePhases[i]);
+                            positions[pointIndex] = particleBasePositions[pointIndex] * wave;
+                            positions[pointIndex + 1] = particleBasePositions[pointIndex + 1] * wave;
+                            positions[pointIndex + 2] = particleBasePositions[pointIndex + 2] * wave;
+                        }
+                        particleMesh.geometry.attributes.position.needsUpdate = true;
+                        particleMesh.material.opacity = 0.74 + 0.16 * pulseIntensity;
+                    }
                     
                     // Apply pulse to opacity
                     if (solidMesh && solidMesh.material) {
-                        solidMesh.material.opacity = 0.4 + 0.1 * pulseIntensity;
+                        solidMesh.material.opacity = 0.035 + 0.035 * pulseIntensity;
                     }
                 }
-                
+
+                updateControlReadout();
+
                 // Render the scene
                 renderer.render(scene, camera);
             }
@@ -298,6 +803,10 @@
             
             // Initialize MediaPipe Hands
             async function initMediaPipeHands() {
+                if (controlState.source !== 'browser') {
+                    return null;
+                }
+
                 statusElement.textContent = 'Initializing MediaPipe Hands...';
                 
                 const hands = new Hands({
@@ -314,7 +823,9 @@
                 });
                 
                 await hands.initialize();
-                statusElement.textContent = 'Hand tracking ready!';
+                if (controlState.source === 'browser') {
+                    statusElement.textContent = 'Hand tracking ready!';
+                }
                 
                 return hands;
             }
@@ -379,9 +890,94 @@
                     canvasCtx.fill();
                 });
             }
+
+            function getRaspberryVideoRect() {
+                const canvasWidth = canvasElement.width || window.innerWidth;
+                const canvasHeight = canvasElement.height || window.innerHeight;
+                const videoWidth = raspberryVideoElement.naturalWidth || 4;
+                const videoHeight = raspberryVideoElement.naturalHeight || 3;
+                const videoRatio = videoWidth / videoHeight;
+                const canvasRatio = canvasWidth / canvasHeight;
+
+                if (canvasRatio > videoRatio) {
+                    const height = canvasHeight;
+                    const width = height * videoRatio;
+                    return {
+                        x: (canvasWidth - width) / 2,
+                        y: 0,
+                        width,
+                        height,
+                    };
+                }
+
+                const width = canvasWidth;
+                const height = width / videoRatio;
+                return {
+                    x: 0,
+                    y: (canvasHeight - height) / 2,
+                    width,
+                    height,
+                };
+            }
+
+            function drawRaspberryLandmarks() {
+                if (controlState.source !== 'raspberry') {
+                    return;
+                }
+
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                if (!controlState.handDetected || controlState.landmarks.length < 21) {
+                    return;
+                }
+
+                const rect = getRaspberryVideoRect();
+                const connections = [
+                    [0, 1], [1, 2], [2, 3], [3, 4],
+                    [0, 5], [5, 6], [6, 7], [7, 8],
+                    [0, 9], [9, 10], [10, 11], [11, 12],
+                    [0, 13], [13, 14], [14, 15], [15, 16],
+                    [0, 17], [17, 18], [18, 19], [19, 20],
+                    [5, 9], [9, 13], [13, 17],
+                ];
+                const toCanvasPoint = (point) => ({
+                    x: rect.x + point.x * rect.width,
+                    y: rect.y + point.y * rect.height,
+                });
+
+                canvasCtx.save();
+                canvasCtx.lineWidth = 3;
+                canvasCtx.strokeStyle = 'rgba(0, 255, 255, 0.95)';
+                connections.forEach(([startIndex, endIndex]) => {
+                    const start = controlState.landmarks[startIndex];
+                    const end = controlState.landmarks[endIndex];
+                    if (!start || !end) {
+                        return;
+                    }
+                    const startPoint = toCanvasPoint(start);
+                    const endPoint = toCanvasPoint(end);
+                    canvasCtx.beginPath();
+                    canvasCtx.moveTo(startPoint.x, startPoint.y);
+                    canvasCtx.lineTo(endPoint.x, endPoint.y);
+                    canvasCtx.stroke();
+                });
+
+                controlState.landmarks.forEach((landmark, index) => {
+                    const point = toCanvasPoint(landmark);
+                    const isPinchTip = index === 4 || index === 8;
+                    canvasCtx.fillStyle = isPinchTip ? '#ff3b30' : '#39ff14';
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(point.x, point.y, isPinchTip ? 7 : 5, 0, Math.PI * 2);
+                    canvasCtx.fill();
+                });
+                canvasCtx.restore();
+            }
             
             // Process video frames
             function onResults(results) {
+                if (controlState.source !== 'browser' || !browserCameraRunning) {
+                    return;
+                }
+
                 // Clear canvas
                 canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
                 
@@ -419,27 +1015,13 @@
                             
                             // Calculate the distance between thumb and index finger
                             const pinchDistance = calculateDistance(thumbTip, indexTip);
-                            
-                            // Map the pinch distance to a sphere size (adjusted for better UX)
-                            // Smaller distance = smaller sphere, larger distance = larger sphere
-                            
-                            // Calibrate distance range based on reasonable hand movement
-                            // Normal pinch is around 0.05-0.1, open hand is 0.2-0.3
-                            if (pinchDistance < 0.05) {
-                                targetSphereSize = 0.2; // Minimum size when pinched
-                            } else if (pinchDistance > 0.25) {
-                                targetSphereSize = 2.0; // Maximum size when fully open
-                            } else {
-                                // Linear mapping from pinch distance to sphere size
-                                targetSphereSize = 0.2 + (pinchDistance - 0.05) * (2.0 - 0.2) / (0.25 - 0.05);
-                            }
-                            
-                            // Apply smooth interpolation toward the target size
-                            currentSphereSize = currentSphereSize + (targetSphereSize - currentSphereSize) * smoothingFactor;
-                            
-                            // Apply the smoothed size to the sphere
-                            if (sphere) {
-                                sphere.scale.set(currentSphereSize, currentSphereSize, currentSphereSize);
+
+                            if (controlState.source === 'browser') {
+                                controlState.targetScale = mapPinchDistanceToScale(pinchDistance);
+                                controlState.motion = true;
+                                controlState.area = pinchDistance * 100000;
+                                controlState.gesture = 'right_hand_pinch';
+                                controlState.lastMessageAt = Date.now();
                             }
                             
                             rightHandActive = true;
@@ -458,6 +1040,9 @@
                                     if (solidMesh && solidMesh.material) {
                                         solidMesh.material.color.setHex(newColor);
                                     }
+                                    if (particleMaterial) {
+                                        particleMaterial.color.setHex(newColor);
+                                    }
                                     lastColorChangeTime = currentTime;
                                 }
                                 
@@ -473,24 +1058,13 @@
             // Initialize and start the app
             async function startApp() {
                 try {
-                    await initWebcam();
                     initThreeJS(); // Initialize Three.js
-                    const hands = await initMediaPipeHands();
-                    
-                    hands.onResults(onResults);
-                    
-                    const camera = new Camera(videoElement, {
-                        onFrame: async () => {
-                            await hands.send({image: videoElement});
-                        },
-                        width: 1920,
-                        height: 1080
-                    });
-                    
-                    camera.start();
-                    
+                    await setMode('browser');
+
                 } catch (error) {
-                    statusElement.textContent = `Error: ${error.message}`;
+                    if (controlState.source === 'browser') {
+                        statusElement.textContent = `Browser camera unavailable: ${error.message}`;
+                    }
                     console.error('Error starting application:', error);
                 }
             }

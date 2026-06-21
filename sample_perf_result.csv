@@ -1,0 +1,3 @@
+timestamp,second,camera_index,width,height,target_fps,mode,infer_skip,model_complexity,max_num_hands,jpeg_quality,video_enabled,camera_fps,process_fps,infer_fps,ws_fps,mjpeg_fps,cpu_percent,memory_mb,temp_c,throttled_raw,throttled_flags,read_ms,preprocess_ms,inference_ms,encode_ms,loop_ms,area,scale,motion,clients,frame_shape,hand_detected,landmark_count,pinch_distance,confidence
+1781510401.1,1,0,640,480,10,opencv,3,0,1,70,False,9.95,9.95,0,9.95,0,42.5,96.2,51.8,0x0,ok,8.3,4.2,3.1,0,17.4,6331,0.83,1,0,480x640x3,0,0,0,
+1781510402.1,2,0,640,480,10,opencv,3,0,1,70,False,9.98,9.98,0,9.98,0,43.1,96.4,52.4,0x0,ok,8.1,4.1,3.0,0,17.1,6550,0.85,1,0,480x640x3,0,0,0,
