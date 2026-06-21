@@ -87,7 +87,9 @@
             right: 20px;
             width: min(320px, calc(100vw - 40px));
             color: #fff;
-            background-color: rgba(0, 0, 0, 0.55);
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             padding: 12px;
             border-radius: 6px;
             font-family: Arial, sans-serif;
@@ -113,23 +115,35 @@
         .control-mode-buttons button,
         #connect-raspberry {
             min-height: 34px;
-            border: 1px solid rgba(255, 255, 255, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 4px;
             color: #fff;
-            background: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.08);
             cursor: pointer;
+            transition: all 0.25s ease;
+        }
+
+        .mode-buttons button:hover,
+        .control-mode-buttons button:hover,
+        #connect-raspberry:hover {
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.15);
         }
 
         .mode-buttons button.active {
-            color: #000;
-            background: #00ffff;
-            border-color: #00ffff;
+            color: #fff;
+            background: rgba(0, 229, 255, 0.2);
+            border-color: #00e5ff;
+            box-shadow: 0 0 12px rgba(0, 229, 255, 0.35);
+            text-shadow: 0 0 4px #00e5ff;
         }
 
         .control-mode-buttons button.active {
-            color: #000;
-            background: #39ff14;
-            border-color: #39ff14;
+            color: #fff;
+            background: rgba(186, 85, 211, 0.2);
+            border-color: #ba55d3;
+            box-shadow: 0 0 12px rgba(186, 85, 211, 0.35);
+            text-shadow: 0 0 4px #ba55d3;
         }
 
         .shape-buttons {
@@ -141,17 +155,25 @@
 
         .shape-buttons button {
             min-height: 34px;
-            border: 1px solid rgba(255, 255, 255, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 4px;
             color: #fff;
-            background: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.08);
             cursor: pointer;
+            transition: all 0.25s ease;
+        }
+
+        .shape-buttons button:hover {
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.15);
         }
 
         .shape-buttons button.active {
-            color: #000;
-            background: #ff00ff;
-            border-color: #ff00ff;
+            color: #fff;
+            background: rgba(255, 123, 84, 0.2);
+            border-color: #ff7b54;
+            box-shadow: 0 0 12px rgba(255, 123, 84, 0.35);
+            text-shadow: 0 0 4px #ff7b54;
         }
 
         #ws-url,
@@ -245,12 +267,14 @@
             let scene, camera, renderer;
             let sphere, solidMesh, wireframeMesh, particleMesh, particleMaterial;
             let particleBasePositions = null;
+            let sphereColors = null;
             let particlePhases = null;
             
             // Shape morphing variables
             let targetShape = 'sphere';
             let morphProgress = 0.0;
             let nailongBasePositions = null;
+            let nailongColors = null;
             let nailongLoaded = false;
             let isNailongLoading = false;
             
@@ -642,6 +666,21 @@
                         
                         // Sample 4600 points (matching count in sphere creation)
                         nailongBasePositions = samplePointsFromGeometry(geometry, 4600);
+                        
+                        // Compute volumetric colors for Nailong based on distance
+                        nailongColors = new Float32Array(4600 * 3);
+                        for (let i = 0; i < 4600; i++) {
+                            const pointIndex = i * 3;
+                            const px = nailongBasePositions[pointIndex];
+                            const py = nailongBasePositions[pointIndex + 1];
+                            const pz = nailongBasePositions[pointIndex + 2];
+                            const dist = Math.sqrt(px*px + py*py + pz*pz);
+                            const color = getNebulaColor(dist, 2.0);
+                            nailongColors[pointIndex] = color.r;
+                            nailongColors[pointIndex + 1] = color.g;
+                            nailongColors[pointIndex + 2] = color.b;
+                        }
+
                         nailongLoaded = true;
                         isNailongLoading = false;
                         
@@ -853,18 +892,34 @@
                 return neonColors[Math.floor(Math.random() * neonColors.length)];
             }
 
+            // Generate elegant Cosmic Nebula color based on spatial distance from center
+            function getNebulaColor(distance, maxRadius = 2.0) {
+                const t = Math.min(1.0, Math.max(0.0, distance / maxRadius));
+                
+                const cCore = new THREE.Color(0xfff7e6); // Creamy Gold-White
+                const cMid = new THREE.Color(0xd630ae);  // Deep Amethyst Magenta
+                const cEdge = new THREE.Color(0x00e5ff); // Cosmic Electric Cyan
+                const cOuter = new THREE.Color(0x1a2a6c); // Deep Midnight Blue
+
+                const color = new THREE.Color();
+                if (t < 0.28) {
+                    const localT = t / 0.28;
+                    color.lerpColors(cCore, cMid, localT);
+                } else if (t < 0.72) {
+                    const localT = (t - 0.28) / 0.44;
+                    color.lerpColors(cMid, cEdge, localT);
+                } else {
+                    const localT = (t - 0.72) / 0.28;
+                    color.lerpColors(cEdge, cOuter, localT);
+                }
+                return color;
+            }
+
             function createParticleSphere({ count = 4200, radius = 2 }) {
                 const geometry = new THREE.BufferGeometry();
                 const positions = new Float32Array(count * 3);
                 const colors = new Float32Array(count * 3);
                 const phases = new Float32Array(count);
-                const palette = [
-                    new THREE.Color(0x00ffff),
-                    new THREE.Color(0x39ff14),
-                    new THREE.Color(0xffffff),
-                    new THREE.Color(0x66ffcc),
-                    new THREE.Color(0xff4fd8),
-                ];
 
                 for (let i = 0; i < count; i++) {
                     const pointIndex = i * 3;
@@ -874,15 +929,20 @@
                     const particleRadius = radius * (0.38 + 0.62 * Math.pow(shellBias, 0.28));
                     const ring = Math.sqrt(1 - u * u);
 
-                    positions[pointIndex] = particleRadius * ring * Math.cos(theta);
-                    positions[pointIndex + 1] = particleRadius * u;
-                    positions[pointIndex + 2] = particleRadius * ring * Math.sin(theta);
+                    const px = particleRadius * ring * Math.cos(theta);
+                    const py = particleRadius * u;
+                    const pz = particleRadius * ring * Math.sin(theta);
 
-                    const color = palette[Math.floor(Math.random() * palette.length)].clone();
-                    color.multiplyScalar(0.65 + Math.random() * 0.55);
+                    positions[pointIndex] = px;
+                    positions[pointIndex + 1] = py;
+                    positions[pointIndex + 2] = pz;
+
+                    const dist = Math.sqrt(px*px + py*py + pz*pz);
+                    const color = getNebulaColor(dist, radius);
                     colors[pointIndex] = color.r;
                     colors[pointIndex + 1] = color.g;
                     colors[pointIndex + 2] = color.b;
+                    
                     phases[i] = Math.random() * Math.PI * 2;
                 }
 
@@ -900,6 +960,7 @@
                 });
 
                 particleBasePositions = new Float32Array(positions);
+                sphereColors = new Float32Array(colors);
                 particlePhases = phases;
                 particleMaterial = material;
                 return new THREE.Points(geometry, material);
@@ -1001,7 +1062,8 @@
 
                     if (particleMesh && particleBasePositions && particlePhases) {
                         const positions = particleMesh.geometry.attributes.position.array;
-                        const hasNailong = nailongLoaded && nailongBasePositions;
+                        const colorsAttr = particleMesh.geometry.attributes.color.array;
+                        const hasNailong = nailongLoaded && nailongBasePositions && nailongColors;
 
                         for (let i = 0; i < particlePhases.length; i++) {
                             const pointIndex = i * 3;
@@ -1026,8 +1088,27 @@
                             positions[pointIndex] = bx * wave;
                             positions[pointIndex + 1] = by * wave;
                             positions[pointIndex + 2] = bz * wave;
+
+                            // Interpolate colors dynamically
+                            const sr = sphereColors[pointIndex];
+                            const sg = sphereColors[pointIndex + 1];
+                            const sb = sphereColors[pointIndex + 2];
+                            
+                            let nr = sr;
+                            let ng = sg;
+                            let nb = sb;
+                            if (hasNailong) {
+                                nr = nailongColors[pointIndex];
+                                ng = nailongColors[pointIndex + 1];
+                                nb = nailongColors[pointIndex + 2];
+                            }
+
+                            colorsAttr[pointIndex] = sr + (nr - sr) * morphProgress;
+                            colorsAttr[pointIndex + 1] = sg + (ng - sg) * morphProgress;
+                            colorsAttr[pointIndex + 2] = sb + (nb - sb) * morphProgress;
                         }
                         particleMesh.geometry.attributes.position.needsUpdate = true;
+                        particleMesh.geometry.attributes.color.needsUpdate = true;
                         particleMesh.material.opacity = 0.74 + 0.16 * pulseIntensity;
                     }
                     
@@ -1250,8 +1331,7 @@
                 });
                 canvasCtx.restore();
             }
-            
-            // Process video frames
+               // Process video frames
             function onResults(results) {
                 if (controlState.source !== 'browser' || !browserCameraRunning) {
                     return;
@@ -1266,72 +1346,103 @@
                     updateCanvasSize();
                 }
                 
-                // Reset the tracking flags for this frame
                 rightHandActive = false;
                 leftHandActive = false;
                 
-                // Process hand landmarks if detected
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                     controlState.handDetected = true;
-                    const handRotation = calculateHandRotation(results.multiHandLandmarks[0]);
-                    controlState.handRotX = handRotation.x;
-                    controlState.handRotY = handRotation.y;
-                    controlState.handRotZ = handRotation.z;
-
-                    // Update status text
-                    statusElement.textContent = 
-                        results.multiHandLandmarks.length === 1 ? '1 hand detected' :
-                        `${results.multiHandLandmarks.length} hands detected`;
                     
-                    // Process each hand
-                    for (let handIndex = 0; handIndex < results.multiHandLandmarks.length; handIndex++) {
-                        const landmarks = results.multiHandLandmarks[handIndex];
-                        const handedness = results.multiHandedness[handIndex].label;
-                        const isLeftHand = handedness === 'Left';
+                    const numHands = results.multiHandLandmarks.length;
+                    statusElement.textContent = numHands === 1 ? '1 hand detected (Single hand mode)' : `${numHands} hands detected (Dual hand mode)`;
+                    
+                    if (numHands === 1) {
+                        // SINGLE HAND MODE: This hand does EVERYTHING (scale + rotate + touch color)
+                        const landmarks = results.multiHandLandmarks[0];
+                        const handedness = results.multiHandedness[0].label;
+                        const isLeft = handedness === 'Left';
                         
-                        // Draw the hand landmarks with appropriate color
-                        drawLandmarks(landmarks, isLeftHand);
+                        // Draw hand (Cyan color by default for single hand control)
+                        drawLandmarks(landmarks, isLeft);
                         
-                        if (!isLeftHand) {
-                            // RIGHT HAND: Control sphere size with thumb-index distance
-                            // Get thumb tip and index finger tip positions
-                            const thumbTip = landmarks[4];
-                            const indexTip = landmarks[8];
-                            
-                            // Calculate the distance between thumb and index finger
-                            const pinchDistance = calculateDistance(thumbTip, indexTip);
-
-                            if (controlState.source === 'browser') {
-                                controlState.targetScale = mapPinchDistanceToScale(pinchDistance);
-                                controlState.motion = true;
-                                controlState.area = pinchDistance * 100000;
-                                controlState.gesture = 'right_hand_pinch';
-                                controlState.lastMessageAt = Date.now();
+                        // 1. Rotation control
+                        const handRotation = calculateHandRotation(landmarks);
+                        controlState.handRotX = handRotation.x;
+                        controlState.handRotY = handRotation.y;
+                        controlState.handRotZ = handRotation.z;
+                        
+                        // 2. Pinch scale control
+                        const thumbTip = landmarks[4];
+                        const indexTip = landmarks[8];
+                        const pinchDistance = calculateDistance(thumbTip, indexTip);
+                        
+                        controlState.targetScale = mapPinchDistanceToScale(pinchDistance);
+                        controlState.motion = true;
+                        controlState.area = pinchDistance * 100000;
+                        controlState.gesture = isLeft ? 'left_hand_pinch' : 'right_hand_pinch';
+                        controlState.lastMessageAt = Date.now();
+                        
+                        // 3. Touch color trigger
+                        if (isPointInSphere(indexTip)) {
+                            const currentTime = Date.now();
+                            if (currentTime - lastColorChangeTime > colorChangeDelay) {
+                                const newColor = getRandomNeonColor();
+                                if (solidMesh && solidMesh.material) {
+                                    solidMesh.material.color.setHex(newColor);
+                                }
+                                lastColorChangeTime = currentTime;
                             }
+                        }
+                    } else {
+                        // DUAL HAND MODE: Right hand controls rotation and scale, Left hand controls color touch
+                        let rightHandLandmarks = null;
+                        let leftHandLandmarks = null;
+                        
+                        for (let i = 0; i < numHands; i++) {
+                            const landmarks = results.multiHandLandmarks[i];
+                            const handedness = results.multiHandedness[i].label;
+                            const isLeft = handedness === 'Left';
                             
+                            drawLandmarks(landmarks, isLeft);
+                            
+                            if (!isLeft) {
+                                rightHandLandmarks = landmarks;
+                            } else {
+                                leftHandLandmarks = landmarks;
+                            }
+                        }
+                        
+                        // If we found a Right hand, use it to control rotation & scaling
+                        if (rightHandLandmarks) {
+                            const handRotation = calculateHandRotation(rightHandLandmarks);
+                            controlState.handRotX = handRotation.x;
+                            controlState.handRotY = handRotation.y;
+                            controlState.handRotZ = handRotation.z;
+                            
+                            const thumbTip = rightHandLandmarks[4];
+                            const indexTip = rightHandLandmarks[8];
+                            const pinchDistance = calculateDistance(thumbTip, indexTip);
+                            
+                            controlState.targetScale = mapPinchDistanceToScale(pinchDistance);
+                            controlState.motion = true;
+                            controlState.area = pinchDistance * 100000;
+                            controlState.gesture = 'right_hand_pinch';
+                            controlState.lastMessageAt = Date.now();
                             rightHandActive = true;
-                        } else {
-                            // LEFT HAND: Change color when index finger touches sphere
-                            // Get index finger tip position (landmark 8)
-                            const indexTip = landmarks[8];
-                            
-                            // Check if index finger is touching the sphere
+                        }
+                        
+                        // If we found a Left hand, check if it touches the sphere to trigger color changes
+                        if (leftHandLandmarks) {
+                            const indexTip = leftHandLandmarks[8];
                             if (isPointInSphere(indexTip)) {
-                                // Change color with a cooldown to prevent rapid changes
                                 const currentTime = Date.now();
                                 if (currentTime - lastColorChangeTime > colorChangeDelay) {
-                                    // Change to a random neon color
                                     const newColor = getRandomNeonColor();
                                     if (solidMesh && solidMesh.material) {
                                         solidMesh.material.color.setHex(newColor);
                                     }
-                                    if (particleMaterial) {
-                                        particleMaterial.color.setHex(newColor);
-                                    }
-                                    lastColorChangeTime = currentTime;
+                                    leftHandActive = true;
                                 }
-                                
-                                leftHandActive = true;
+                                lastColorChangeTime = currentTime;
                             }
                         }
                     }
