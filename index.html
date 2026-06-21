@@ -1667,35 +1667,35 @@
                 const ringExtended = (ringDist / palmLength > ratioThreshold) || isFingerStraight(primaryHand, 13, 14, 15, 16);
                 const pinkyExtended = (pinkyDist / palmLength > ratioThreshold) || isFingerStraight(primaryHand, 17, 18, 19, 20);
 
+                // Calculate primary hand raised fingers count first
+                let raisedCount = 0;
+                if (indexExtended) raisedCount++;
+                if (middleExtended) raisedCount++;
+                if (ringExtended) raisedCount++;
+                if (pinkyExtended) raisedCount++;
+
                 // Function to verify if a single hand is in a "half-heart" C-shape claw posture
                 function checkHalfHeart(hand, pLength) {
                     const thumbIndexD = calculateDistance(hand[4], hand[8]) / pLength;
                     
                     const iRatio = calculateDistance(hand[8], hand[5]) / pLength;
-                    const mRatio = calculateDistance(hand[12], hand[9]) / pLength;
-                    const rRatio = calculateDistance(hand[16], hand[13]) / pLength;
-                    const pRatio = calculateDistance(hand[20], hand[17]) / pLength;
-
-                    let arched = 0;
-                    if (iRatio > 0.30 && iRatio < 0.76) arched++;
-                    if (mRatio > 0.30 && mRatio < 0.76) arched++;
-                    if (rRatio > 0.30 && rRatio < 0.76) arched++;
-                    if (pRatio > 0.30 && pRatio < 0.76) arched++;
-
                     const tRatio = calculateDistance(hand[4], hand[2]) / pLength;
-                    const tArched = tRatio > 0.38;
 
-                    const iD = calculateDistance(hand[0], hand[8]);
+                    // Index is arched (forming the top half-curve)
+                    const indexArched = iRatio > 0.32 && iRatio < 0.88;
+                    // Thumb is extended/arched (forming the bottom half-curve)
+                    const thumbArched = tRatio > 0.35;
+                    
+                    // The other three fingers are curled into the palm
                     const mD = calculateDistance(hand[0], hand[12]);
                     const rD = calculateDistance(hand[0], hand[16]);
                     const pD = calculateDistance(hand[0], hand[20]);
+                    const mExtended = (mD / pLength) > ratioThreshold;
+                    const rExtended = (rD / pLength) > ratioThreshold;
+                    const pExtended = (pD / pLength) > ratioThreshold;
+                    const otherCurled = !mExtended && !rExtended && !pExtended;
 
-                    const notStraight = (iD/pLength <= ratioThreshold) && 
-                                         (mD/pLength <= ratioThreshold) && 
-                                         (rD/pLength <= ratioThreshold) && 
-                                         (pD/pLength <= ratioThreshold);
-
-                    return (thumbIndexD > 0.85 && thumbIndexD < 2.2) && (arched >= 3) && tArched && notStraight;
+                    return (thumbIndexD > 0.65 && thumbIndexD < 2.0) && indexArched && thumbArched && otherCurled;
                 }
 
                 // Function to verify if a single hand is in a crossover finger-heart (比心) posture
@@ -1736,20 +1736,32 @@
                     const rExtended = (rD / pLength) > ratioThreshold;
                     const pExtended = (pD / pLength) > ratioThreshold;
 
-                    // Thumb tip is higher than index tip (ratioUp > 0.05) and crossed towards pinky side (ratioThumb < 0.05)
-                    const isCrossover = (ratioUp > 0.05) && (ratioThumb < 0.05);
+                    // Relaxed crossover checks to allow easy trigger under varying angles
+                    const isCrossover = (ratioUp > -0.15) && (ratioThumb < 0.15);
                     return (thumbIndexDRatio < 0.38) && isCrossover && (!mExtended && !rExtended && !pExtended);
                 }
 
-                // Check single-hand half-heart or crossover finger-heart on the primary hand
-                let isFingerHeart = checkHalfHeart(primaryHand, palmLength) || checkCrossoverFingerHeart(primaryHand, palmLength);
+                // Check single-hand half-heart or crossover finger-heart on the primary hand, 
+                // or if the primary hand is fully curled/fist (raisedCount === 0)
+                let isFingerHeart = checkHalfHeart(primaryHand, palmLength) || 
+                                    checkCrossoverFingerHeart(primaryHand, palmLength) ||
+                                    (raisedCount === 0);
 
                 // Check secondary hand half-heart or dual-hand joined heart if present
                 if (secondaryHand && secondaryHand.length >= 21) {
                     const palmLengthSec = calculateDistance(secondaryHand[0], secondaryHand[9]);
                     if (palmLengthSec > 0.01) {
-                        // Check if either hand is in a half-heart or crossover posture
-                        if (checkHalfHeart(secondaryHand, palmLengthSec) || checkCrossoverFingerHeart(secondaryHand, palmLengthSec)) {
+                        // Check if either hand is in a half-heart or crossover posture, or if the second hand is a fist/curled
+                        const raisedCountSec = [
+                            (calculateDistance(secondaryHand[0], secondaryHand[8]) / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 5, 6, 7, 8),
+                            (calculateDistance(secondaryHand[0], secondaryHand[12]) / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 9, 10, 11, 12),
+                            (calculateDistance(secondaryHand[0], secondaryHand[16]) / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 13, 14, 15, 16),
+                            (calculateDistance(secondaryHand[0], secondaryHand[20]) / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 17, 18, 19, 20)
+                        ].filter(Boolean).length;
+
+                        if (checkHalfHeart(secondaryHand, palmLengthSec) || 
+                            checkCrossoverFingerHeart(secondaryHand, palmLengthSec) ||
+                            (raisedCountSec === 0)) {
                             isFingerHeart = true;
                         }
 
@@ -1771,12 +1783,6 @@
                     gestureHistory = [];
                     return;
                 }
-
-                let raisedCount = 0;
-                if (indexExtended) raisedCount++;
-                if (middleExtended) raisedCount++;
-                if (ringExtended) raisedCount++;
-                if (pinkyExtended) raisedCount++;
 
                 let targetGestureShape = null;
                 if (isFingerHeart) {
