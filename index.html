@@ -1563,7 +1563,9 @@
                 // Detect Chinese "finger heart" (比心) gesture:
                 // Thumb tip (4) and Index tip (8) are pinched close together, and other fingers are curled.
                 const thumbIndexDist = calculateDistance(landmarks[4], landmarks[8]);
+                // Chinese finger-heart crossing: thumb tip (4) is physically higher than index tip (8) on Y-axis (Y-axis points downwards in MediaPipe)
                 const isFingerHeart = (thumbIndexDist < 0.045) && 
+                                      (landmarks[4].y < landmarks[8].y) &&
                                       (!middleExtended && !ringExtended && !pinkyExtended);
 
                 // If shape is locked during pinch interaction, do not switch shapes,
