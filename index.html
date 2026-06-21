@@ -274,6 +274,9 @@
             const controlModeButtons = document.querySelectorAll('[data-control-mode]');
             const shapeButtons = document.querySelectorAll('[data-shape]');
             
+            // Particle configuration
+            const PARTICLE_COUNT = 12000;
+            
             // Three.js variables
             let scene, camera, renderer;
             let sphere, solidMesh, wireframeMesh, particleMesh, particleMaterial;
@@ -716,12 +719,12 @@
                         const scaleFactor = targetRadius / radius;
                         geometry.scale(scaleFactor, scaleFactor, scaleFactor);
                         
-                        // Sample 4600 points (matching count in sphere creation)
-                        nailongBasePositions = samplePointsFromGeometry(geometry, 4600);
+                        // Sample points (matching count in sphere creation)
+                        nailongBasePositions = samplePointsFromGeometry(geometry, PARTICLE_COUNT);
                         
                         // Compute volumetric colors for Nailong based on body characteristics (Yellow body, White belly)
-                        nailongColors = new Float32Array(4600 * 3);
-                        for (let i = 0; i < 4600; i++) {
+                        nailongColors = new Float32Array(PARTICLE_COUNT * 3);
+                        for (let i = 0; i < PARTICLE_COUNT; i++) {
                             const pointIndex = i * 3;
                             const px = nailongBasePositions[pointIndex];
                             const py = nailongBasePositions[pointIndex + 1];
@@ -1028,7 +1031,7 @@
             }
 
             function precomputeShapes(baseColorHex = "#00e5ff") {
-                const count = 4600;
+                const count = PARTICLE_COUNT;
                 
                 // 1. Initialize brightness factors if not already done
                 if (!brightnessFactors) {
@@ -1291,7 +1294,7 @@
                 return sphereColors;
             }
 
-            function createParticleSphere({ count = 4600, radius = 2 }) {
+            function createParticleSphere({ count = PARTICLE_COUNT, radius = 2 }) {
                 precomputeShapes();
 
                 const geometry = new THREE.BufferGeometry();
@@ -1319,7 +1322,7 @@
                 geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
                 const material = new THREE.PointsMaterial({
-                    size: 0.065,
+                    size: 0.046, // Slightly smaller size for high-density sharp look
                     sizeAttenuation: true,
                     map: createCircleTexture(),
                     vertexColors: true,
@@ -1364,7 +1367,7 @@
                 // Create a group to hold the particle cloud and wireframe shell.
                 sphere = new THREE.Group();
 
-                particleMesh = createParticleSphere({ count: 4600, radius: 2 });
+                particleMesh = createParticleSphere({ count: PARTICLE_COUNT, radius: 2 });
                 sphere.add(particleMesh);
 
                 // Keep a subtle transparent fill to make the volume readable on camera backgrounds.
