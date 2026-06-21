@@ -1560,49 +1560,34 @@
                 const ringExtended = (ringDist / palmLength) > ratioThreshold;
                 const pinkyExtended = (pinkyDist / palmLength) > ratioThreshold;
 
-                // Detect Chinese "finger heart" (比心) gesture with rotation/scale invariant local coordinates:
-                // 1. Calculate local coordinate axes of the palm:
-                // - Up: pointing from wrist (0) to middle MCP (9)
-                const vUpX = landmarks[9].x - landmarks[0].x;
-                const vUpY = landmarks[9].y - landmarks[0].y;
-                const vUpZ = landmarks[9].z - landmarks[0].z;
-                const lenUp = Math.sqrt(vUpX * vUpX + vUpY * vUpY + vUpZ * vUpZ) || 1;
-                const uUp = { x: vUpX / lenUp, y: vUpY / lenUp, z: vUpZ / lenUp };
-
-                // - Thumb Side (horizontal): pointing from pinky MCP (17) to index MCP (5)
-                const vThumbX = landmarks[5].x - landmarks[17].x;
-                const vThumbY = landmarks[5].y - landmarks[17].y;
-                const vThumbZ = landmarks[5].z - landmarks[17].z;
-                const lenThumb = Math.sqrt(vThumbX * vThumbX + vThumbY * vThumbY + vThumbZ * vThumbZ) || 1;
-                const uThumb = { x: vThumbX / lenThumb, y: vThumbY / lenThumb, z: vThumbZ / lenThumb };
-
-                // 2. Calculate vector from index tip (8) to thumb tip (4)
-                const v8to4X = landmarks[4].x - landmarks[8].x;
-                const v8to4Y = landmarks[4].y - landmarks[8].y;
-                const v8to4Z = landmarks[4].z - landmarks[8].z;
-
-                // 3. Project v8to4 onto local palm axes
-                const dotUp = v8to4X * uUp.x + v8to4Y * uUp.y + v8to4Z * uUp.z;
-                const dotThumb = v8to4X * uThumb.x + v8to4Y * uThumb.y + v8to4Z * uThumb.z;
-
-                // Ratios relative to palm length
-                const ratioUp = dotUp / palmLength;
-                const ratioThumb = dotThumb / palmLength;
-
-                // 4. Calculate scale-independent tip-to-tip distance
+                // Detect "half-heart" (单手半心 / C型弧形手) gesture:
+                // 1. Thumb-index tip distance is relatively large (0.85 to 2.2 of palm length)
                 const thumbIndexDist = calculateDistance(landmarks[4], landmarks[8]);
                 const thumbIndexDistRatio = thumbIndexDist / palmLength;
 
-                // Check crossover and curled state:
-                // - In a finger heart:
-                //   - The thumb tip is higher than the index tip in the local "up" direction (ratioUp > 0.05)
-                //   - The thumb tip crosses over towards the pinky side (ratioThumb < 0.05, i.e., not extended far to the thumb side)
-                //   - The thumb and index tip distance is relatively small (< 0.38 to allow crossover spacing)
-                //   - Other fingers are curled/closed.
-                const isCrossover = (ratioUp > 0.05) && (ratioThumb < 0.05);
-                const isFingerHeart = (thumbIndexDistRatio < 0.38) && 
-                                      isCrossover &&
-                                      (!middleExtended && !ringExtended && !pinkyExtended);
+                // 2. All four fingers are arched (medium distance between knuckle and tip)
+                const indexRatio = calculateDistance(landmarks[8], landmarks[5]) / palmLength;
+                const middleRatio = calculateDistance(landmarks[12], landmarks[9]) / palmLength;
+                const ringRatio = calculateDistance(landmarks[16], landmarks[13]) / palmLength;
+                const pinkyRatio = calculateDistance(landmarks[20], landmarks[17]) / palmLength;
+
+                let archedCount = 0;
+                if (indexRatio > 0.30 && indexRatio < 0.76) archedCount++;
+                if (middleRatio > 0.30 && middleRatio < 0.76) archedCount++;
+                if (ringRatio > 0.30 && ringRatio < 0.76) archedCount++;
+                if (pinkyRatio > 0.30 && pinkyRatio < 0.76) archedCount++;
+
+                // 3. Thumb is also arched/extended away from the hand
+                const thumbRatio = calculateDistance(landmarks[4], landmarks[2]) / palmLength;
+                const thumbArched = thumbRatio > 0.38;
+
+                // 4. Verify none of the fingers are fully extended straight (avoiding open hand conflict)
+                const fingersNotStraight = !indexExtended && !middleExtended && !ringExtended && !pinkyExtended;
+
+                const isFingerHeart = (thumbIndexDistRatio > 0.85 && thumbIndexDistRatio < 2.2) &&
+                                      (archedCount >= 3) &&
+                                      thumbArched &&
+                                      fingersNotStraight;
 
                 // If shape is locked during pinch interaction, do not switch shapes,
                 // EXCEPT if the user is making the specific "finger heart" gesture to trigger the Heart shape!
