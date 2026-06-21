@@ -457,11 +457,18 @@
                 controlState.landmarkCount = Number(data.landmarkCount ?? 0);
                 controlState.pinchDistance = pinchDistance;
                 controlState.landmarks = Array.isArray(data.landmarks) ? data.landmarks : [];
+                if (pinchDistance < 0.08) {
+                    shapeLocked = true;
+                } else if (pinchDistance > 0.16) {
+                    shapeLocked = false;
+                }
+
                 if (controlState.handDetected && controlState.landmarks.length >= 21) {
                     const handRotation = calculateHandRotation(controlState.landmarks);
                     controlState.handRotX = handRotation.x;
                     controlState.handRotY = handRotation.y;
                     controlState.handRotZ = handRotation.z;
+                    processShapeSwitchingGestures(controlState.landmarks);
                 }
                 if (controlState.controlMode === 'pinch') {
                     if (controlState.handDetected && controlState.landmarkCount >= 9) {
@@ -1250,27 +1257,48 @@
 
                     // ==================== LEAF ====================
                     if (initPositions) {
-                        // 15% midrib (central vein), 85% blade
+                        // 15% midrib (central vein) & stem
                         if (i < count * 0.15) {
-                            const t = Math.random(); // 0 (base) to 1 (tip)
-                            const ly = (t - 0.5) * 3.4;
+                            const t = -0.15 + 1.15 * Math.random(); // -0.15 (stem base) to 1.0 (leaf tip)
                             const lx = 0;
-                            // Gentle curve along the leaf length
-                            const lz = -0.32 * Math.sin(Math.PI * t);
+                            const ly = (t - 0.5) * 3.4;
+                            const tPositive = Math.max(0, t);
+                            const lz = -0.32 * Math.sin(Math.PI * tPositive);
                             
                             leafPositions[idx] = lx;
                             leafPositions[idx + 1] = ly;
                             leafPositions[idx + 2] = lz;
-                        } else {
+                        } 
+                        // 20% side veins branching out at an angle
+                        else if (i < count * 0.35) {
+                            const v = Math.floor(Math.random() * 6); // 6 pairs of side veins
+                            const t0 = 0.12 + 0.72 * (v / 5); // spacing along the leaf length
+                            const side = Math.random() < 0.5 ? -1 : 1;
+                            const d = Math.random(); // distance from midrib to edge
+                            
+                            const widthProfile = 1.15 * Math.sin(Math.PI * t0) * (0.42 + 0.58 * t0);
+                            const lx = side * d * widthProfile;
+                            const ly = (t0 - 0.5) * 3.4 + 0.42 * Math.abs(lx); // angled upwards
+                            
+                            // Reconstruct local t for proper bending
+                            const tCurr = clamp((ly / 3.4) + 0.5, 0.0, 1.0);
+                            const fold = 0.28 * Math.abs(lx);
+                            const curve = -0.32 * Math.sin(Math.PI * tCurr);
+                            const lz = curve + fold + randomNormal() * 0.02;
+                            
+                            leafPositions[idx] = lx + randomNormal() * 0.015;
+                            leafPositions[idx + 1] = ly + randomNormal() * 0.015;
+                            leafPositions[idx + 2] = lz;
+                        }
+                        // 65% blade body
+                        else {
                             const t = Math.random(); // length position
                             const u = Math.random() * 2 - 1; // width position
                             
-                            // Leaf width profile: sin-based, wider near bottom
                             const widthProfile = 1.15 * Math.sin(Math.PI * t) * (0.42 + 0.58 * t);
                             const lx = u * widthProfile;
                             const ly = (t - 0.5) * 3.4;
                             
-                            // Fold the leaf along the midrib (V-shape) + curve along Y-axis
                             const fold = 0.28 * Math.abs(lx);
                             const curve = -0.32 * Math.sin(Math.PI * t);
                             const lz = curve + fold + randomNormal() * 0.04;
@@ -1280,15 +1308,15 @@
                             leafPositions[idx + 2] = lz;
                         }
                     }
-                    // Color mapping: Leaf Green (Emerald Green body, Lime Green midrib/stem)
+                    // Color mapping: Leaf Green (Emerald Green body, Lime Green midrib/stem/veins)
                     // The leaf colors adapt to the color picker HSL to allow purple/blue/red leaves too!
                     const ly = leafPositions[idx + 1];
                     const lx = leafPositions[idx];
-                    const leafT = (ly / 3.4) + 0.5; // normalized 0 to 1
+                    const leafT = clamp((ly / 3.4) + 0.5, 0.0, 1.0); // normalized 0 to 1
                     
-                    const isMidrib = (Math.abs(lx) < 0.06) || (i < count * 0.15);
+                    const isVeinOrStem = (i < count * 0.35) || (Math.abs(lx) < 0.06);
                     let leafColor;
-                    if (isMidrib) {
+                    if (isVeinOrStem) {
                         // Bright lime-green or shifted bright version of the chosen picker color
                         const cStem = new THREE.Color().setHSL((tempHSL.h + 0.05) % 1.0, Math.min(1.0, tempHSL.s + 0.1), Math.min(1.0, tempHSL.l + 0.25));
                         leafColor = cStem.multiplyScalar(bright);
