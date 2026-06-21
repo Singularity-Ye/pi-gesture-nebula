@@ -1507,10 +1507,22 @@
                     sphere.scale.set(currentSphereSize, currentSphereSize, currentSphereSize);
 
                     if (controlState.handDetected) {
-                        // Smoothly interpolate rotation to match hand orientation
-                        sphere.rotation.x += (controlState.handRotX - sphere.rotation.x) * smoothingFactor;
-                        sphere.rotation.y += (controlState.handRotY - sphere.rotation.y) * smoothingFactor;
-                        sphere.rotation.z += (controlState.handRotZ - sphere.rotation.z) * smoothingFactor;
+                        if (targetShape === 'heart') {
+                            // Keep the heart upright and facing the camera directly (override hand rotation)
+                            // We allow a very subtle responsive tilt to make it feel alive, but lock roll to 0
+                            const targetRotX = controlState.handRotX * 0.12;
+                            const targetRotY = controlState.handRotY * 0.12;
+                            const targetRotZ = 0;
+                            
+                            sphere.rotation.x += (targetRotX - sphere.rotation.x) * smoothingFactor;
+                            sphere.rotation.y += (targetRotY - sphere.rotation.y) * smoothingFactor;
+                            sphere.rotation.z += (targetRotZ - sphere.rotation.z) * smoothingFactor;
+                        } else {
+                            // Smoothly interpolate rotation to match hand orientation for other shapes
+                            sphere.rotation.x += (controlState.handRotX - sphere.rotation.x) * smoothingFactor;
+                            sphere.rotation.y += (controlState.handRotY - sphere.rotation.y) * smoothingFactor;
+                            sphere.rotation.z += (controlState.handRotZ - sphere.rotation.z) * smoothingFactor;
+                        }
                     } else {
                         // Auto-spin when no hand is detected
                         sphere.rotation.x += 0.003 + controlState.rotateX;
