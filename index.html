@@ -132,6 +132,28 @@
             border-color: #39ff14;
         }
 
+        .shape-buttons {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin: 8px 0;
+        }
+
+        .shape-buttons button {
+            min-height: 34px;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: 4px;
+            color: #fff;
+            background: rgba(255, 255, 255, 0.12);
+            cursor: pointer;
+        }
+
+        .shape-buttons button.active {
+            color: #000;
+            background: #ff00ff;
+            border-color: #ff00ff;
+        }
+
         #ws-url,
         #mjpeg-url {
             box-sizing: border-box;
@@ -187,9 +209,14 @@
                 <button type="button" data-control-mode="pinch">Pinch</button>
                 <button type="button" data-control-mode="hybrid">Hybrid</button>
             </div>
+            <div class="shape-buttons">
+                <button type="button" data-shape="sphere" class="active">Sphere</button>
+                <button type="button" data-shape="nailong">Nailong</button>
+            </div>
             <div id="control-readout"></div>
         </div>
     </div>
+
 
     <p id="links-para"><a href="https://x.com/measure_plan" target="_blank">Twitter</a> | <a href="https://www.instagram.com/stereo.drift/" target="_blank">Instagram</a> | <a href="https://github.com/collidingScopes/threejs-handtracking-101" target="_blank">Source Code</a> | <a href="https://buymeacoffee.com/stereodrift" target="_blank">❤️</a></p>
 
@@ -197,6 +224,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const videoElement = document.getElementById('webcam');
@@ -211,12 +239,20 @@
             const connectButton = document.getElementById('connect-raspberry');
             const modeButtons = document.querySelectorAll('[data-mode]');
             const controlModeButtons = document.querySelectorAll('[data-control-mode]');
+            const shapeButtons = document.querySelectorAll('[data-shape]');
             
             // Three.js variables
             let scene, camera, renderer;
             let sphere, solidMesh, wireframeMesh, particleMesh, particleMaterial;
             let particleBasePositions = null;
             let particlePhases = null;
+            
+            // Shape morphing variables
+            let targetShape = 'sphere';
+            let morphProgress = 0.0;
+            let nailongBasePositions = null;
+            let nailongLoaded = false;
+            let isNailongLoading = false;
             
             // Hand tracking variables
             let rightHandActive = false;
@@ -452,6 +488,130 @@
                 }
             }
 
+            // Sample points from loaded STL geometry using CDF area-weighting
+            function samplePointsFromGeometry(geometry, targetCount) {
+                const positionAttribute = geometry.getAttribute('position');
+                const numVertices = positionAttribute.count;
+                const numTriangles = Math.floor(numVertices / 3);
+                
+                const vA = new THREE.Vector3();
+                const vB = new THREE.Vector3();
+                const vC = new THREE.Vector3();
+                
+                // Calculate areas and CDF
+                const cumulativeAreas = new Float64Array(numTriangles);
+                let totalArea = 0;
+                
+                for (let i = 0; i < numTriangles; i++) {
+                    vA.fromBufferAttribute(positionAttribute, i * 3);
+                    vB.fromBufferAttribute(positionAttribute, i * 3 + 1);
+                    vC.fromBufferAttribute(positionAttribute, i * 3 + 2);
+                    
+                    const edge1 = new THREE.Vector3().subVectors(vB, vA);
+                    const edge2 = new THREE.Vector3().subVectors(vC, vA);
+                    const cross = new THREE.Vector3().crossVectors(edge1, edge2);
+                    const area = 0.5 * cross.length();
+                    
+                    totalArea += area;
+                    cumulativeAreas[i] = totalArea;
+                }
+                
+                const sampledPoints = new Float32Array(targetCount * 3);
+                
+                // Binary search helper
+                function binarySearch(target) {
+                    let low = 0;
+                    let high = numTriangles - 1;
+                    while (low < high) {
+                        const mid = (low + high) >> 1;
+                        if (cumulativeAreas[mid] < target) {
+                            low = mid + 1;
+                        } else {
+                            high = mid;
+                        }
+                    }
+                    return low;
+                }
+                
+                for (let i = 0; i < targetCount; i++) {
+                    const r = Math.random() * totalArea;
+                    const triIndex = binarySearch(r);
+                    
+                    vA.fromBufferAttribute(positionAttribute, triIndex * 3);
+                    vB.fromBufferAttribute(positionAttribute, triIndex * 3 + 1);
+                    vC.fromBufferAttribute(positionAttribute, triIndex * 3 + 2);
+                    
+                    // Random point inside triangle
+                    let r1 = Math.random();
+                    let r2 = Math.random();
+                    if (r1 + r2 > 1) {
+                        r1 = 1 - r1;
+                        r2 = 1 - r2;
+                    }
+                    const r3 = 1 - r1 - r2;
+                    
+                    const x = r3 * vA.x + r1 * vB.x + r2 * vC.x;
+                    const y = r3 * vA.y + r1 * vB.y + r2 * vC.y;
+                    const z = r3 * vA.z + r1 * vB.z + r2 * vC.z;
+                    
+                    sampledPoints[i * 3] = x;
+                    sampledPoints[i * 3 + 1] = y;
+                    sampledPoints[i * 3 + 2] = z;
+                }
+                
+                return sampledPoints;
+            }
+
+            // On-demand load and sample Nailong STL
+            function loadAndSampleNailong() {
+                if (isNailongLoading || nailongLoaded) return;
+                isNailongLoading = true;
+                statusElement.textContent = "Loading 3D model (24MB)... Please wait...";
+                
+                const loader = new THREE.STLLoader();
+                loader.load('models/奶龙175mm高.stl', (geometry) => {
+                    try {
+                        // Align model to center
+                        geometry.center();
+                        // Orient model upright (typically stl is z-up, threejs is y-up)
+                        geometry.rotateX(-Math.PI / 2);
+                        
+                        // Scale model to fit target bounding sphere radius of 2.0 (matching sphere)
+                        geometry.computeBoundingSphere();
+                        const radius = geometry.boundingSphere.radius;
+                        const targetRadius = 2.0;
+                        const scaleFactor = targetRadius / radius;
+                        geometry.scale(scaleFactor, scaleFactor, scaleFactor);
+                        
+                        // Sample 4600 points (matching count in sphere creation)
+                        nailongBasePositions = samplePointsFromGeometry(geometry, 4600);
+                        nailongLoaded = true;
+                        isNailongLoading = false;
+                        
+                        setTargetShape('nailong');
+                        statusElement.textContent = "Nailong loaded successfully!";
+                        setTimeout(() => {
+                            if (statusElement.textContent === "Nailong loaded successfully!") {
+                                statusElement.textContent = "Hand tracking ready!";
+                            }
+                        }, 2000);
+                    } catch (err) {
+                        console.error("Error sampling STL geometry:", err);
+                        statusElement.textContent = "Error parsing 3D model.";
+                        isNailongLoading = false;
+                    }
+                }, (xhr) => {
+                    if (xhr.total) {
+                        const percent = Math.round((xhr.loaded / xhr.total) * 100);
+                        statusElement.textContent = `Loading 3D model (24MB): ${percent}%`;
+                    }
+                }, (error) => {
+                    console.error("Error loading STL file:", error);
+                    statusElement.textContent = "Failed to load 3D model stl file.";
+                    isNailongLoading = false;
+                });
+            }
+
             modeButtons.forEach((button) => {
                 button.addEventListener('click', () => setMode(button.dataset.mode));
             });
@@ -459,6 +619,28 @@
                 button.addEventListener('click', () => setControlMode(button.dataset.controlMode));
             });
             connectButton.addEventListener('click', connectRaspberrySocket);
+
+            shapeButtons.forEach((button) => {
+                button.addEventListener('click', () => {
+                    const shape = button.dataset.shape;
+                    if (shape === 'sphere') {
+                        setTargetShape('sphere');
+                    } else if (shape === 'nailong') {
+                        if (nailongLoaded) {
+                            setTargetShape('nailong');
+                        } else if (!isNailongLoading) {
+                            loadAndSampleNailong();
+                        }
+                    }
+                });
+            });
+
+            function setTargetShape(shape) {
+                targetShape = shape;
+                shapeButtons.forEach((btn) => {
+                    btn.classList.toggle('active', btn.dataset.shape === shape);
+                });
+            }
             window.addEventListener('pagehide', () => {
                 disconnectRaspberrySocket();
                 stopRaspberryVideo();
@@ -744,22 +926,54 @@
                     const time = Date.now() * 0.001; // Convert to seconds
                     const pulseIntensity = 0.1 * Math.sin(time * 2) + 0.9; // Oscillate between 0.8 and 1.0
 
+                    // Smoothly morph between sphere and nailong shape
+                    const morphSpeed = 0.05;
+                    if (targetShape === 'nailong') {
+                        morphProgress = Math.min(1.0, morphProgress + morphSpeed);
+                    } else {
+                        morphProgress = Math.max(0.0, morphProgress - morphSpeed);
+                    }
+
                     if (particleMesh && particleBasePositions && particlePhases) {
                         const positions = particleMesh.geometry.attributes.position.array;
+                        const hasNailong = nailongLoaded && nailongBasePositions;
+
                         for (let i = 0; i < particlePhases.length; i++) {
                             const pointIndex = i * 3;
+                            const sx = particleBasePositions[pointIndex];
+                            const sy = particleBasePositions[pointIndex + 1];
+                            const sz = particleBasePositions[pointIndex + 2];
+                            
+                            let nx = sx;
+                            let ny = sy;
+                            let nz = sz;
+                            if (hasNailong) {
+                                nx = nailongBasePositions[pointIndex];
+                                ny = nailongBasePositions[pointIndex + 1];
+                                nz = nailongBasePositions[pointIndex + 2];
+                            }
+                            
+                            const bx = sx + (nx - sx) * morphProgress;
+                            const by = sy + (ny - sy) * morphProgress;
+                            const bz = sz + (nz - sz) * morphProgress;
+
                             const wave = 1 + 0.035 * Math.sin(time * 2.2 + particlePhases[i]);
-                            positions[pointIndex] = particleBasePositions[pointIndex] * wave;
-                            positions[pointIndex + 1] = particleBasePositions[pointIndex + 1] * wave;
-                            positions[pointIndex + 2] = particleBasePositions[pointIndex + 2] * wave;
+                            positions[pointIndex] = bx * wave;
+                            positions[pointIndex + 1] = by * wave;
+                            positions[pointIndex + 2] = bz * wave;
                         }
                         particleMesh.geometry.attributes.position.needsUpdate = true;
                         particleMesh.material.opacity = 0.74 + 0.16 * pulseIntensity;
                     }
                     
-                    // Apply pulse to opacity
+                    // Fade out wireframe and solid volume as we morph to nailong
+                    if (wireframeMesh && wireframeMesh.material) {
+                        wireframeMesh.material.opacity = (1 - morphProgress) * 0.18;
+                        wireframeMesh.visible = (morphProgress < 0.99);
+                    }
                     if (solidMesh && solidMesh.material) {
-                        solidMesh.material.opacity = 0.035 + 0.035 * pulseIntensity;
+                        solidMesh.material.opacity = (1 - morphProgress) * (0.035 + 0.035 * pulseIntensity);
+                        solidMesh.visible = (morphProgress < 0.99);
                     }
                 }
 
