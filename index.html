@@ -238,9 +238,10 @@
                 <button type="button" data-shape="galaxy">Galaxy</button>
                 <button type="button" data-shape="saturn">Saturn</button>
                 <button type="button" data-shape="lotus">Lotus</button>
+                <button type="button" data-shape="leaf">Leaf 🍃</button>
                 <button type="button" data-shape="heart">Heart</button>
                 <button type="button" data-shape="nailong">Nailong P.</button>
-                <button type="button" data-shape="nailong_solid" style="grid-column: span 3;">Nailong Solid</button>
+                <button type="button" data-shape="nailong_solid" style="grid-column: span 2;">Nailong Solid</button>
             </div>
             <div class="color-picker-container" style="margin: 8px 0; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 8px;">
                 <label for="particle-color" style="font-size: 12px; color: rgba(255, 255, 255, 0.85);">Nebula Color:</label>
@@ -296,11 +297,13 @@
             let galaxyPositions = null;
             let saturnPositions = null;
             let lotusPositions = null;
+            let leafPositions = null;
             let heartPositions = null;
 
             let galaxyColors = null;
             let saturnColors = null;
             let lotusColors = null;
+            let leafColors = null;
             let heartColors = null;
 
             let currentBasePositions = null;
@@ -1070,6 +1073,7 @@
                     galaxyPositions = new Float32Array(count * 3);
                     saturnPositions = new Float32Array(count * 3);
                     lotusPositions = new Float32Array(count * 3);
+                    leafPositions = new Float32Array(count * 3);
                     heartPositions = new Float32Array(count * 3);
                 }
 
@@ -1078,6 +1082,7 @@
                 galaxyColors = new Float32Array(count * 3);
                 saturnColors = new Float32Array(count * 3);
                 lotusColors = new Float32Array(count * 3);
+                leafColors = new Float32Array(count * 3);
                 heartColors = new Float32Array(count * 3);
 
                 // Helper for Box-Muller Gaussian noise
@@ -1243,6 +1248,60 @@
                         lotusColors[idx + 2] = pColor.b;
                     }
 
+                    // ==================== LEAF ====================
+                    if (initPositions) {
+                        // 15% midrib (central vein), 85% blade
+                        if (i < count * 0.15) {
+                            const t = Math.random(); // 0 (base) to 1 (tip)
+                            const ly = (t - 0.5) * 3.4;
+                            const lx = 0;
+                            // Gentle curve along the leaf length
+                            const lz = -0.32 * Math.sin(Math.PI * t);
+                            
+                            leafPositions[idx] = lx;
+                            leafPositions[idx + 1] = ly;
+                            leafPositions[idx + 2] = lz;
+                        } else {
+                            const t = Math.random(); // length position
+                            const u = Math.random() * 2 - 1; // width position
+                            
+                            // Leaf width profile: sin-based, wider near bottom
+                            const widthProfile = 1.15 * Math.sin(Math.PI * t) * (0.42 + 0.58 * t);
+                            const lx = u * widthProfile;
+                            const ly = (t - 0.5) * 3.4;
+                            
+                            // Fold the leaf along the midrib (V-shape) + curve along Y-axis
+                            const fold = 0.28 * Math.abs(lx);
+                            const curve = -0.32 * Math.sin(Math.PI * t);
+                            const lz = curve + fold + randomNormal() * 0.04;
+                            
+                            leafPositions[idx] = lx + randomNormal() * 0.02;
+                            leafPositions[idx + 1] = ly + randomNormal() * 0.02;
+                            leafPositions[idx + 2] = lz;
+                        }
+                    }
+                    // Color mapping: Leaf Green (Emerald Green body, Lime Green midrib/stem)
+                    // The leaf colors adapt to the color picker HSL to allow purple/blue/red leaves too!
+                    const ly = leafPositions[idx + 1];
+                    const lx = leafPositions[idx];
+                    const leafT = (ly / 3.4) + 0.5; // normalized 0 to 1
+                    
+                    const isMidrib = (Math.abs(lx) < 0.06) || (i < count * 0.15);
+                    let leafColor;
+                    if (isMidrib) {
+                        // Bright lime-green or shifted bright version of the chosen picker color
+                        const cStem = new THREE.Color().setHSL((tempHSL.h + 0.05) % 1.0, Math.min(1.0, tempHSL.s + 0.1), Math.min(1.0, tempHSL.l + 0.25));
+                        leafColor = cStem.multiplyScalar(bright);
+                    } else {
+                        // Rich green or base HSL picker color
+                        const cBaseHSL = new THREE.Color().setHSL(tempHSL.h, tempHSL.s, Math.max(0.12, tempHSL.l - 0.1));
+                        const cShiftHSL = new THREE.Color().setHSL((tempHSL.h - 0.05 + 1.0) % 1.0, tempHSL.s, Math.max(0.08, tempHSL.l - 0.2));
+                        leafColor = cBaseHSL.clone().lerp(cShiftHSL, leafT).multiplyScalar(bright);
+                    }
+                    leafColors[idx] = leafColor.r;
+                    leafColors[idx + 1] = leafColor.g;
+                    leafColors[idx + 2] = leafColor.b;
+
                     // ==================== HEART ====================
                     if (initPositions) {
                         const theta = Math.random() * Math.PI * 2 - Math.PI;
@@ -1276,6 +1335,7 @@
                 if (shape === 'galaxy') return galaxyPositions;
                 if (shape === 'saturn') return saturnPositions;
                 if (shape === 'lotus') return lotusPositions;
+                if (shape === 'leaf') return leafPositions;
                 if (shape === 'heart') return heartPositions;
                 if (shape === 'nailong' || shape === 'nailong_solid') {
                     return (nailongLoaded && nailongBasePositions) ? nailongBasePositions : spherePositions;
@@ -1287,6 +1347,7 @@
                 if (shape === 'galaxy') return galaxyColors;
                 if (shape === 'saturn') return saturnColors;
                 if (shape === 'lotus') return lotusColors;
+                if (shape === 'leaf') return leafColors;
                 if (shape === 'heart') return heartColors;
                 if (shape === 'nailong' || shape === 'nailong_solid') {
                     return (nailongLoaded && nailongColors) ? nailongColors : sphereColors;
@@ -1683,7 +1744,13 @@
                 } else if (raisedCount === 3 && indexExtended && middleExtended && ringExtended) {
                     targetGestureShape = 'saturn';
                 } else if (raisedCount === 4 && indexExtended && middleExtended && ringExtended && pinkyExtended) {
-                    targetGestureShape = 'lotus';
+                    // Check if thumb is also extended (5 fingers open palm -> Leaf, 4 fingers -> Lotus)
+                    const thumbExtended = (calculateDistance(primaryHand[4], primaryHand[5]) / palmLength) > 0.76;
+                    if (thumbExtended) {
+                        targetGestureShape = 'leaf';
+                    } else {
+                        targetGestureShape = 'lotus';
+                    }
                 } else if (raisedCount === 0) {
                     targetGestureShape = 'heart'; // Fist also maps to heart
                 }
