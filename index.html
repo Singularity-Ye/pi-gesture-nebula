@@ -273,6 +273,9 @@
                 targetScale: 1.0,
                 rotateX: 0,
                 rotateY: 0,
+                handRotX: 0,
+                handRotY: 0,
+                handRotZ: 0,
                 motion: false,
                 area: 0,
                 gesture: 'none',
@@ -372,6 +375,12 @@
                 controlState.landmarkCount = Number(data.landmarkCount ?? 0);
                 controlState.pinchDistance = pinchDistance;
                 controlState.landmarks = Array.isArray(data.landmarks) ? data.landmarks : [];
+                if (controlState.handDetected && controlState.landmarks.length >= 21) {
+                    const handRotation = calculateHandRotation(controlState.landmarks);
+                    controlState.handRotX = handRotation.x;
+                    controlState.handRotY = handRotation.y;
+                    controlState.handRotZ = handRotation.z;
+                }
                 if (controlState.controlMode === 'pinch') {
                     if (controlState.handDetected && controlState.landmarkCount >= 9) {
                         controlState.targetScale = pinchScale;
@@ -550,9 +559,17 @@
                     }
                     const r3 = 1 - r1 - r2;
                     
-                    const x = r3 * vA.x + r1 * vB.x + r2 * vC.x;
-                    const y = r3 * vA.y + r1 * vB.y + r2 * vC.y;
-                    const z = r3 * vA.z + r1 * vB.z + r2 * vC.z;
+                    let x = r3 * vA.x + r1 * vB.x + r2 * vC.x;
+                    let y = r3 * vA.y + r1 * vB.y + r2 * vC.y;
+                    let z = r3 * vA.z + r1 * vB.z + r2 * vC.z;
+                    
+                    // Volumetric filling: with 40% probability, scale the point inward towards center (0,0,0)
+                    if (Math.random() < 0.40) {
+                        const k = 0.15 + 0.80 * Math.random();
+                        x *= k;
+                        y *= k;
+                        z *= k;
+                    }
                     
                     sampledPoints[i * 3] = x;
                     sampledPoints[i * 3 + 1] = y;
@@ -560,6 +577,46 @@
                 }
                 
                 return sampledPoints;
+            }
+
+            // Calculate hand rotation (roll, pitch, yaw) from MediaPipe landmarks
+            function calculateHandRotation(landmarks) {
+                if (!landmarks || landmarks.length < 21) {
+                    return { x: 0, y: 0, z: 0 };
+                }
+                const p0 = landmarks[0];
+                const p9 = landmarks[9];
+                const p5 = landmarks[5];
+                const p17 = landmarks[17];
+                
+                // 1. Roll (rotation around Z-axis)
+                // Angle of the hand relative to vertical
+                const roll = Math.atan2(p9.y - p0.y, p9.x - p0.x) + Math.PI / 2;
+                
+                // 2. Pitch and Yaw (rotation around X and Y axes)
+                // Vectors on the palm plane
+                const ux = p5.x - p0.x;
+                const uy = p5.y - p0.y;
+                const uz = p5.z - p0.z;
+                
+                const vx = p17.x - p0.x;
+                const vy = p17.y - p0.y;
+                const vz = p17.z - p0.z;
+                
+                // Normal vector of the palm (cross product)
+                const nx = uy * vz - uz * vy;
+                const ny = uz * vx - ux * vz;
+                const nz = ux * vy - uy * vx;
+                
+                const len = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
+                const normX = nx / len;
+                const normY = ny / len;
+                
+                // Map to rotation angles (limit rotation for ergonomic comfort)
+                const pitch = normY * Math.PI * 0.45;
+                const yaw = -normX * Math.PI * 0.45;
+                
+                return { x: pitch, y: yaw, z: -roll };
             }
 
             // On-demand load and sample Nailong STL
@@ -918,9 +975,17 @@
                     currentSphereSize = currentSphereSize + (controlState.targetScale - currentSphereSize) * smoothingFactor;
                     sphere.scale.set(currentSphereSize, currentSphereSize, currentSphereSize);
 
-                    // Remove the condition that stops rotation during hand interaction
-                    sphere.rotation.x += 0.003 + controlState.rotateX;
-                    sphere.rotation.y += 0.008 + controlState.rotateY;
+                    if (controlState.handDetected) {
+                        // Smoothly interpolate rotation to match hand orientation
+                        sphere.rotation.x += (controlState.handRotX - sphere.rotation.x) * smoothingFactor;
+                        sphere.rotation.y += (controlState.handRotY - sphere.rotation.y) * smoothingFactor;
+                        sphere.rotation.z += (controlState.handRotZ - sphere.rotation.z) * smoothingFactor;
+                    } else {
+                        // Auto-spin when no hand is detected
+                        sphere.rotation.x += 0.003 + controlState.rotateX;
+                        sphere.rotation.y += 0.008 + controlState.rotateY;
+                        sphere.rotation.z += (0 - sphere.rotation.z) * 0.05; // Return roll to 0
+                    }
                     
                     // Add pulsing glow effect to the neon fill
                     const time = Date.now() * 0.001; // Convert to seconds
@@ -1207,6 +1272,12 @@
                 
                 // Process hand landmarks if detected
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    controlState.handDetected = true;
+                    const handRotation = calculateHandRotation(results.multiHandLandmarks[0]);
+                    controlState.handRotX = handRotation.x;
+                    controlState.handRotY = handRotation.y;
+                    controlState.handRotZ = handRotation.z;
+
                     // Update status text
                     statusElement.textContent = 
                         results.multiHandLandmarks.length === 1 ? '1 hand detected' :
@@ -1266,6 +1337,7 @@
                     }
                 } else {
                     statusElement.textContent = 'No hands detected';
+                    controlState.handDetected = false;
                 }
             }
             
