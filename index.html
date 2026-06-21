@@ -1589,15 +1589,58 @@
                     return (thumbIndexD > 0.85 && thumbIndexD < 2.2) && (arched >= 3) && tArched && notStraight;
                 }
 
-                // Check single-hand half-heart on the primary hand
-                let isFingerHeart = checkHalfHeart(primaryHand, palmLength);
+                // Function to verify if a single hand is in a crossover finger-heart (比心) posture
+                function checkCrossoverFingerHeart(hand, pLength) {
+                    // Local up axis: wrist (0) to middle MCP (9)
+                    const vUpX = hand[9].x - hand[0].x;
+                    const vUpY = hand[9].y - hand[0].y;
+                    const vUpZ = hand[9].z - hand[0].z;
+                    const lenUp = Math.sqrt(vUpX * vUpX + vUpY * vUpY + vUpZ * vUpZ) || 1;
+                    const uUp = { x: vUpX / lenUp, y: vUpY / lenUp, z: vUpZ / lenUp };
+
+                    // Local thumb-ward axis: pinky MCP (17) to index MCP (5)
+                    const vThumbX = hand[5].x - hand[17].x;
+                    const vThumbY = hand[5].y - hand[17].y;
+                    const vThumbZ = hand[5].z - hand[17].z;
+                    const lenThumb = Math.sqrt(vThumbX * vThumbX + vThumbY * vThumbY + vThumbZ * vThumbZ) || 1;
+                    const uThumb = { x: vThumbX / lenThumb, y: vThumbY / lenThumb, z: vThumbZ / lenThumb };
+
+                    // Vector from index tip (8) to thumb tip (4)
+                    const v8to4X = hand[4].x - hand[8].x;
+                    const v8to4Y = hand[4].y - hand[8].y;
+                    const v8to4Z = hand[4].z - hand[8].z;
+
+                    const dotUp = v8to4X * uUp.x + v8to4Y * uUp.y + v8to4Z * uUp.z;
+                    const dotThumb = v8to4X * uThumb.x + v8to4Y * uThumb.y + v8to4Z * uThumb.z;
+
+                    const ratioUp = dotUp / pLength;
+                    const ratioThumb = dotThumb / pLength;
+
+                    const thumbIndexD = calculateDistance(hand[4], hand[8]);
+                    const thumbIndexDRatio = thumbIndexD / pLength;
+
+                    const mD = calculateDistance(hand[0], hand[12]);
+                    const rD = calculateDistance(hand[0], hand[16]);
+                    const pD = calculateDistance(hand[0], hand[20]);
+
+                    const mExtended = (mD / pLength) > ratioThreshold;
+                    const rExtended = (rD / pLength) > ratioThreshold;
+                    const pExtended = (pD / pLength) > ratioThreshold;
+
+                    // Thumb tip is higher than index tip (ratioUp > 0.05) and crossed towards pinky side (ratioThumb < 0.05)
+                    const isCrossover = (ratioUp > 0.05) && (ratioThumb < 0.05);
+                    return (thumbIndexDRatio < 0.38) && isCrossover && (!mExtended && !rExtended && !pExtended);
+                }
+
+                // Check single-hand half-heart or crossover finger-heart on the primary hand
+                let isFingerHeart = checkHalfHeart(primaryHand, palmLength) || checkCrossoverFingerHeart(primaryHand, palmLength);
 
                 // Check secondary hand half-heart or dual-hand joined heart if present
                 if (secondaryHand && secondaryHand.length >= 21) {
                     const palmLengthSec = calculateDistance(secondaryHand[0], secondaryHand[9]);
                     if (palmLengthSec > 0.01) {
-                        // Check if either hand is in a half-heart posture
-                        if (checkHalfHeart(secondaryHand, palmLengthSec)) {
+                        // Check if either hand is in a half-heart or crossover posture
+                        if (checkHalfHeart(secondaryHand, palmLengthSec) || checkCrossoverFingerHeart(secondaryHand, palmLengthSec)) {
                             isFingerHeart = true;
                         }
 
