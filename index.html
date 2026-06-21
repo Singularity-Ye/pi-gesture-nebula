@@ -962,7 +962,7 @@
 
             // Create a high-quality soft circular glow texture dynamically for particles
             function createCircleTexture() {
-                const size = 64;
+                const size = 128; // Double the resolution to 128x128 for razor-sharp textures
                 const canvas = document.createElement('canvas');
                 canvas.width = size;
                 canvas.height = size;
@@ -970,9 +970,10 @@
 
                 const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
                 gradient.addColorStop(0, 'rgba(255,255,255,1)');
-                gradient.addColorStop(0.35, 'rgba(255,255,255,1)'); // Solid bright core
-                gradient.addColorStop(0.6, 'rgba(255,255,255,0.45)'); // Semi-sharp falloff
-                gradient.addColorStop(1, 'rgba(255,255,255,0)'); // Soft edge
+                gradient.addColorStop(0.45, 'rgba(255,255,255,1)'); // Expand solid core
+                gradient.addColorStop(0.65, 'rgba(255,255,255,0.55)'); // Tight transition falloff
+                gradient.addColorStop(0.85, 'rgba(255,255,255,0)'); // Terminate blur early
+                gradient.addColorStop(1, 'rgba(255,255,255,0)');
 
                 ctx.fillStyle = gradient;
                 ctx.fillRect(0, 0, size, size);
@@ -1347,7 +1348,7 @@
                     antialias: true, 
                     alpha: true  // Enable transparency
                 });
-                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                renderer.setPixelRatio(window.devicePixelRatio);
                 renderer.setSize(window.innerWidth, window.innerHeight);
                 renderer.setClearColor(0x000000, 0); // Transparent background
                 threeContainer.appendChild(renderer.domElement);
