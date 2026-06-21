@@ -275,7 +275,7 @@
             const shapeButtons = document.querySelectorAll('[data-shape]');
             
             // Particle configuration
-            const PARTICLE_COUNT = 12000;
+            const PARTICLE_COUNT = 8000;
             
             // Three.js variables
             let scene, camera, renderer;
@@ -1322,7 +1322,7 @@
                 geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
                 const material = new THREE.PointsMaterial({
-                    size: 0.046, // Slightly smaller size for high-density sharp look
+                    size: 0.05, // Tuned for 8,000 particles to keep them crisp and bright
                     sizeAttenuation: true,
                     map: createCircleTexture(),
                     vertexColors: true,
