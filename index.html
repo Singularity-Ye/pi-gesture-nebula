@@ -310,6 +310,11 @@
             let targetTurbulence = 0.0;
             let turbulenceAmount = 0.0;
             
+            // Gesture shape switcher and lock state
+            let gestureHoldCounter = 0;
+            let lastGestureTarget = null;
+            let shapeLocked = false;
+            
             // Solid model variables
             let nailongSolidMesh = null;
             let nailongSolidMaterial = null;
@@ -1538,21 +1543,36 @@
                     return;
                 }
 
-                // Detect extended fingers (Index, Middle, Ring, Pinky)
-                const indexExtended = landmarks[8].y < landmarks[6].y - 0.025;
-                const middleExtended = landmarks[12].y < landmarks[10].y - 0.025;
-                const ringExtended = landmarks[16].y < landmarks[14].y - 0.025;
-                const pinkyExtended = landmarks[20].y < landmarks[18].y - 0.025;
+                // If shape is locked during pinch interaction, do not switch shapes
+                if (shapeLocked) {
+                    gestureHoldCounter = 0;
+                    lastGestureTarget = null;
+                    return;
+                }
 
-                // Check thumb extension relative to its MCP joint on X
-                const thumbExtended = Math.abs(landmarks[4].x - landmarks[2].x) > 0.075;
+                // Calculate palm length as reference scale (wrist 0 to middle MCP 9)
+                const palmLength = calculateDistance(landmarks[0], landmarks[9]);
+                if (palmLength < 0.01) return;
+
+                // Calculate distance from wrist (0) to each fingertip (8, 12, 16, 20)
+                const indexDist = calculateDistance(landmarks[0], landmarks[8]);
+                const middleDist = calculateDistance(landmarks[0], landmarks[12]);
+                const ringDist = calculateDistance(landmarks[0], landmarks[16]);
+                const pinkyDist = calculateDistance(landmarks[0], landmarks[20]);
+
+                // A finger is extended if its distance from the wrist is > 1.3 * palmLength
+                // This is extremely robust against hand tilt, camera distance, and orientation!
+                const ratioThreshold = 1.3;
+                const indexExtended = (indexDist / palmLength) > ratioThreshold;
+                const middleExtended = (middleDist / palmLength) > ratioThreshold;
+                const ringExtended = (ringDist / palmLength) > ratioThreshold;
+                const pinkyExtended = (pinkyDist / palmLength) > ratioThreshold;
 
                 let raisedCount = 0;
                 if (indexExtended) raisedCount++;
                 if (middleExtended) raisedCount++;
                 if (ringExtended) raisedCount++;
                 if (pinkyExtended) raisedCount++;
-                if (thumbExtended) raisedCount++;
 
                 let targetGestureShape = null;
                 if (raisedCount === 1 && indexExtended) {
@@ -1564,13 +1584,13 @@
                 } else if (raisedCount === 4 && indexExtended && middleExtended && ringExtended && pinkyExtended) {
                     targetGestureShape = 'lotus';
                 } else if (raisedCount === 0) {
-                    targetGestureShape = 'heart';
+                    targetGestureShape = 'heart'; // Fist
                 }
 
                 if (targetGestureShape && targetGestureShape !== targetShape) {
                     if (targetGestureShape === lastGestureTarget) {
                         gestureHoldCounter++;
-                        if (gestureHoldCounter >= 12) { // 12 frames (~0.4s) to confirm
+                        if (gestureHoldCounter >= 10) { // 10 frames (~0.3s) to confirm
                             setTargetShape(targetGestureShape);
                             gestureHoldCounter = 0;
                             lastGestureTarget = null;
@@ -1799,7 +1819,17 @@
                 
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                     controlState.handDetected = true;
-                    processShapeSwitchingGestures(results.multiHandLandmarks[0]);
+                    
+                    // State-machine for locking shape selection during pinch interaction
+                    const primaryHand = results.multiHandLandmarks[0];
+                    const pPinch = calculateDistance(primaryHand[4], primaryHand[8]);
+                    if (pPinch < 0.08) {
+                        shapeLocked = true;
+                    } else if (pPinch > 0.16) {
+                        shapeLocked = false;
+                    }
+                    
+                    processShapeSwitchingGestures(primaryHand);
                     
                     const numHands = results.multiHandLandmarks.length;
                     statusElement.textContent = numHands === 1 ? '1 hand detected (Single hand mode)' : `${numHands} hands detected (Dual hand mode)`;
