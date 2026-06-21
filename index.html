@@ -1543,13 +1543,6 @@
                     return;
                 }
 
-                // If shape is locked during pinch interaction, do not switch shapes
-                if (shapeLocked) {
-                    gestureHoldCounter = 0;
-                    lastGestureTarget = null;
-                    return;
-                }
-
                 // Calculate palm length as reference scale (wrist 0 to middle MCP 9)
                 const palmLength = calculateDistance(landmarks[0], landmarks[9]);
                 if (palmLength < 0.01) return;
@@ -1561,12 +1554,25 @@
                 const pinkyDist = calculateDistance(landmarks[0], landmarks[20]);
 
                 // A finger is extended if its distance from the wrist is > 1.3 * palmLength
-                // This is extremely robust against hand tilt, camera distance, and orientation!
                 const ratioThreshold = 1.3;
                 const indexExtended = (indexDist / palmLength) > ratioThreshold;
                 const middleExtended = (middleDist / palmLength) > ratioThreshold;
                 const ringExtended = (ringDist / palmLength) > ratioThreshold;
                 const pinkyExtended = (pinkyDist / palmLength) > ratioThreshold;
+
+                // Detect Chinese "finger heart" (比心) gesture:
+                // Thumb tip (4) and Index tip (8) are pinched close together, and other fingers are curled.
+                const thumbIndexDist = calculateDistance(landmarks[4], landmarks[8]);
+                const isFingerHeart = (thumbIndexDist < 0.045) && 
+                                      (!middleExtended && !ringExtended && !pinkyExtended);
+
+                // If shape is locked during pinch interaction, do not switch shapes,
+                // EXCEPT if the user is making the specific "finger heart" gesture to trigger the Heart shape!
+                if (shapeLocked && !isFingerHeart) {
+                    gestureHoldCounter = 0;
+                    lastGestureTarget = null;
+                    return;
+                }
 
                 let raisedCount = 0;
                 if (indexExtended) raisedCount++;
@@ -1575,7 +1581,9 @@
                 if (pinkyExtended) raisedCount++;
 
                 let targetGestureShape = null;
-                if (raisedCount === 1 && indexExtended) {
+                if (isFingerHeart) {
+                    targetGestureShape = 'heart';
+                } else if (raisedCount === 1 && indexExtended) {
                     targetGestureShape = 'sphere';
                 } else if (raisedCount === 2 && indexExtended && middleExtended) {
                     targetGestureShape = 'galaxy';
@@ -1584,7 +1592,7 @@
                 } else if (raisedCount === 4 && indexExtended && middleExtended && ringExtended && pinkyExtended) {
                     targetGestureShape = 'lotus';
                 } else if (raisedCount === 0) {
-                    targetGestureShape = 'heart'; // Fist
+                    targetGestureShape = 'heart'; // Fist also maps to heart
                 }
 
                 if (targetGestureShape && targetGestureShape !== targetShape) {
