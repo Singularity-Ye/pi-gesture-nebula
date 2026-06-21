@@ -113,6 +113,7 @@
 
         .mode-buttons button,
         .control-mode-buttons button,
+        .hand-mode-buttons button,
         #connect-raspberry {
             min-height: 34px;
             border: 1px solid rgba(255, 255, 255, 0.2);
@@ -125,6 +126,7 @@
 
         .mode-buttons button:hover,
         .control-mode-buttons button:hover,
+        .hand-mode-buttons button:hover,
         #connect-raspberry:hover {
             border-color: rgba(255, 255, 255, 0.5);
             background: rgba(255, 255, 255, 0.15);
@@ -144,6 +146,21 @@
             border-color: #ba55d3;
             box-shadow: 0 0 12px rgba(186, 85, 211, 0.35);
             text-shadow: 0 0 4px #ba55d3;
+        }
+
+        .hand-mode-buttons {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin: 8px 0;
+        }
+
+        .hand-mode-buttons button.active {
+            color: #fff;
+            background: rgba(46, 204, 113, 0.2);
+            border-color: #2ecc71;
+            box-shadow: 0 0 12px rgba(46, 204, 113, 0.35);
+            text-shadow: 0 0 4px #2ecc71;
         }
 
         .shape-buttons {
@@ -233,6 +250,10 @@
                 <button type="button" data-control-mode="pinch">Pinch</button>
                 <button type="button" data-control-mode="hybrid">Hybrid</button>
             </div>
+            <div class="hand-mode-buttons">
+                <button type="button" data-hand-mode="single">1 Hand</button>
+                <button type="button" data-hand-mode="auto" class="active">Auto (2 Hand)</button>
+            </div>
             <div class="shape-buttons">
                 <button type="button" data-shape="sphere" class="active">Sphere</button>
                 <button type="button" data-shape="galaxy">Galaxy</button>
@@ -273,6 +294,7 @@
             const connectButton = document.getElementById('connect-raspberry');
             const modeButtons = document.querySelectorAll('[data-mode]');
             const controlModeButtons = document.querySelectorAll('[data-control-mode]');
+            const handModeButtons = document.querySelectorAll('[data-hand-mode]');
             const shapeButtons = document.querySelectorAll('[data-shape]');
             
             // Particle configuration
@@ -358,6 +380,7 @@
                 pinchDistance: 0,
                 landmarks: [],
                 controlMode: 'area',
+                handMode: 'auto', // 'single' or 'auto' (default)
                 connected: false,
                 lastMessageAt: 0
             };
@@ -442,6 +465,13 @@
                 controlState.controlMode = mode;
                 controlModeButtons.forEach((button) => {
                     button.classList.toggle('active', button.dataset.controlMode === mode);
+                });
+            }
+
+            function setHandMode(mode) {
+                controlState.handMode = mode;
+                handModeButtons.forEach((button) => {
+                    button.classList.toggle('active', button.dataset.handMode === mode);
                 });
             }
 
@@ -794,6 +824,9 @@
             });
             controlModeButtons.forEach((button) => {
                 button.addEventListener('click', () => setControlMode(button.dataset.controlMode));
+            });
+            handModeButtons.forEach((button) => {
+                button.addEventListener('click', () => setHandMode(button.dataset.handMode));
             });
             connectButton.addEventListener('click', connectRaspberrySocket);
 
@@ -2104,10 +2137,11 @@
                         shapeLocked = false;
                     }
                     
-                    const secondaryHand = results.multiHandLandmarks[1] || null;
+                    const isSingleHandLocked = controlState.handMode === 'single';
+                    const secondaryHand = isSingleHandLocked ? null : (results.multiHandLandmarks[1] || null);
                     processShapeSwitchingGestures(primaryHand, secondaryHand);
                     
-                    const numHands = results.multiHandLandmarks.length;
+                    const numHands = isSingleHandLocked ? 1 : results.multiHandLandmarks.length;
                     statusElement.textContent = numHands === 1 ? '1 hand detected (Single hand mode)' : `${numHands} hands detected (Dual hand mode)`;
                     
                     if (numHands === 1) {
