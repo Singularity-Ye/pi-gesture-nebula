@@ -1868,6 +1868,9 @@
                     
                     // State-machine for locking shape selection during pinch interaction
                     const primaryHand = results.multiHandLandmarks[0];
+                    controlState.landmarks = primaryHand;
+                    controlState.landmarkCount = primaryHand.length;
+                    
                     const pPinch = calculateDistance(primaryHand[4], primaryHand[8]);
                     if (pPinch < 0.08) {
                         shapeLocked = true;
