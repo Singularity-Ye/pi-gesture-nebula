@@ -1741,6 +1741,28 @@
                     return (thumbIndexDRatio < 0.38) && isCrossover && (!mExtended && !rExtended && !pExtended);
                 }
 
+                // Function to verify if a hand is in an upside-down claw-shape (倒着呈爪形)
+                function checkUpsideDownClaw(hand, pLength) {
+                    // 1. Check if fingers are pointing downwards (tips are below MCP joints in screen Y)
+                    const indexDownward = hand[8].y > hand[5].y;
+                    const middleDownward = hand[12].y > hand[9].y;
+                    const ringDownward = hand[16].y > hand[13].y;
+                    const pinkyDownward = hand[20].y > hand[17].y;
+                    
+                    const downwardCount = [indexDownward, middleDownward, ringDownward, pinkyDownward].filter(Boolean).length;
+                    if (downwardCount < 3) return false;
+                    
+                    // 2. Check if it is a claw shape (fingers are curved, not straight)
+                    const indexStraight = isFingerStraight(hand, 5, 6, 7, 8);
+                    const middleStraight = isFingerStraight(hand, 9, 10, 11, 12);
+                    const ringStraight = isFingerStraight(hand, 13, 14, 15, 16);
+                    const pinkyStraight = isFingerStraight(hand, 17, 18, 19, 20);
+                    
+                    const straightCount = [indexStraight, middleStraight, ringStraight, pinkyStraight].filter(Boolean).length;
+                    // If at least 2 of the 4 fingers are curved, we classify it as a claw shape
+                    return straightCount <= 2;
+                }
+
                 // Compute thumb-index distance ratio for C-shape claw detection
                 const primaryThumbIndexD = calculateDistance(primaryHand[4], primaryHand[8]) / palmLength;
 
@@ -1749,6 +1771,7 @@
                 // OR if it forms a C-shape claw (small thumb-index distance and index is curved)
                 let isFingerHeart = checkHalfHeart(primaryHand, palmLength) || 
                                     checkCrossoverFingerHeart(primaryHand, palmLength) ||
+                                    checkUpsideDownClaw(primaryHand, palmLength) ||
                                     (raisedCount === 0) ||
                                     (primaryThumbIndexD < 1.15 && !indexExtended);
 
@@ -1771,6 +1794,7 @@
 
                         if (checkHalfHeart(secondaryHand, palmLengthSec) || 
                             checkCrossoverFingerHeart(secondaryHand, palmLengthSec) ||
+                            checkUpsideDownClaw(secondaryHand, palmLengthSec) ||
                             (raisedCountSec === 0) ||
                             (secondaryThumbIndexD < 1.15 && !secondaryIndexExtended)) {
                             isFingerHeart = true;
