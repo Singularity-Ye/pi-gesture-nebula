@@ -1741,27 +1741,38 @@
                     return (thumbIndexDRatio < 0.38) && isCrossover && (!mExtended && !rExtended && !pExtended);
                 }
 
+                // Compute thumb-index distance ratio for C-shape claw detection
+                const primaryThumbIndexD = calculateDistance(primaryHand[4], primaryHand[8]) / palmLength;
+
                 // Check single-hand half-heart or crossover finger-heart on the primary hand, 
                 // or if the primary hand is fully curled/fist (raisedCount === 0)
+                // OR if it forms a C-shape claw (small thumb-index distance and index is curved)
                 let isFingerHeart = checkHalfHeart(primaryHand, palmLength) || 
                                     checkCrossoverFingerHeart(primaryHand, palmLength) ||
-                                    (raisedCount === 0);
+                                    (raisedCount === 0) ||
+                                    (primaryThumbIndexD < 1.15 && !indexExtended);
 
                 // Check secondary hand half-heart or dual-hand joined heart if present
                 if (secondaryHand && secondaryHand.length >= 21) {
                     const palmLengthSec = calculateDistance(secondaryHand[0], secondaryHand[9]);
                     if (palmLengthSec > 0.01) {
                         // Check if either hand is in a half-heart or crossover posture, or if the second hand is a fist/curled
+                        const secondaryIndexDist = calculateDistance(secondaryHand[0], secondaryHand[8]);
+                        const secondaryIndexExtended = (secondaryIndexDist / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 5, 6, 7, 8);
+
                         const raisedCountSec = [
-                            (calculateDistance(secondaryHand[0], secondaryHand[8]) / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 5, 6, 7, 8),
+                            secondaryIndexExtended,
                             (calculateDistance(secondaryHand[0], secondaryHand[12]) / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 9, 10, 11, 12),
                             (calculateDistance(secondaryHand[0], secondaryHand[16]) / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 13, 14, 15, 16),
                             (calculateDistance(secondaryHand[0], secondaryHand[20]) / palmLengthSec > ratioThreshold) || isFingerStraight(secondaryHand, 17, 18, 19, 20)
                         ].filter(Boolean).length;
 
+                        const secondaryThumbIndexD = calculateDistance(secondaryHand[4], secondaryHand[8]) / palmLengthSec;
+
                         if (checkHalfHeart(secondaryHand, palmLengthSec) || 
                             checkCrossoverFingerHeart(secondaryHand, palmLengthSec) ||
-                            (raisedCountSec === 0)) {
+                            (raisedCountSec === 0) ||
+                            (secondaryThumbIndexD < 1.15 && !secondaryIndexExtended)) {
                             isFingerHeart = true;
                         }
 
