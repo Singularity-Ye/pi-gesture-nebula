@@ -1903,6 +1903,7 @@
                         const indexTip = landmarks[8];
                         const pinchDistance = calculateDistance(thumbTip, indexTip);
                         
+                        controlState.pinchDistance = pinchDistance;
                         controlState.targetScale = mapPinchDistanceToScale(pinchDistance);
                         controlState.motion = true;
                         controlState.area = pinchDistance * 100000;
