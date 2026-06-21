@@ -1529,6 +1529,61 @@
                 const dz = point1.z - point2.z;
                 return Math.sqrt(dx * dx + dy * dy + dz * dz);
             }
+
+            // Monitor finger gestures to switch particle shapes
+            function processShapeSwitchingGestures(landmarks) {
+                if (!landmarks || landmarks.length < 21) {
+                    gestureHoldCounter = 0;
+                    lastGestureTarget = null;
+                    return;
+                }
+
+                // Detect extended fingers (Index, Middle, Ring, Pinky)
+                const indexExtended = landmarks[8].y < landmarks[6].y - 0.025;
+                const middleExtended = landmarks[12].y < landmarks[10].y - 0.025;
+                const ringExtended = landmarks[16].y < landmarks[14].y - 0.025;
+                const pinkyExtended = landmarks[20].y < landmarks[18].y - 0.025;
+
+                // Check thumb extension relative to its MCP joint on X
+                const thumbExtended = Math.abs(landmarks[4].x - landmarks[2].x) > 0.075;
+
+                let raisedCount = 0;
+                if (indexExtended) raisedCount++;
+                if (middleExtended) raisedCount++;
+                if (ringExtended) raisedCount++;
+                if (pinkyExtended) raisedCount++;
+                if (thumbExtended) raisedCount++;
+
+                let targetGestureShape = null;
+                if (raisedCount === 1 && indexExtended) {
+                    targetGestureShape = 'sphere';
+                } else if (raisedCount === 2 && indexExtended && middleExtended) {
+                    targetGestureShape = 'galaxy';
+                } else if (raisedCount === 3 && indexExtended && middleExtended && ringExtended) {
+                    targetGestureShape = 'saturn';
+                } else if (raisedCount === 4 && indexExtended && middleExtended && ringExtended && pinkyExtended) {
+                    targetGestureShape = 'lotus';
+                } else if (raisedCount === 0) {
+                    targetGestureShape = 'heart';
+                }
+
+                if (targetGestureShape && targetGestureShape !== targetShape) {
+                    if (targetGestureShape === lastGestureTarget) {
+                        gestureHoldCounter++;
+                        if (gestureHoldCounter >= 12) { // 12 frames (~0.4s) to confirm
+                            setTargetShape(targetGestureShape);
+                            gestureHoldCounter = 0;
+                            lastGestureTarget = null;
+                        }
+                    } else {
+                        lastGestureTarget = targetGestureShape;
+                        gestureHoldCounter = 0;
+                    }
+                } else {
+                    gestureHoldCounter = 0;
+                    lastGestureTarget = null;
+                }
+            }
             
             // Detect if a point is inside/near the sphere
             function isPointInSphere(point) {
@@ -1744,6 +1799,7 @@
                 
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                     controlState.handDetected = true;
+                    processShapeSwitchingGestures(results.multiHandLandmarks[0]);
                     
                     const numHands = results.multiHandLandmarks.length;
                     statusElement.textContent = numHands === 1 ? '1 hand detected (Single hand mode)' : `${numHands} hands detected (Dual hand mode)`;
