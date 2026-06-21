@@ -1536,61 +1536,85 @@
             }
 
             // Monitor finger gestures to switch particle shapes
-            function processShapeSwitchingGestures(landmarks) {
-                if (!landmarks || landmarks.length < 21) {
+            function processShapeSwitchingGestures(primaryHand, secondaryHand = null) {
+                if (!primaryHand || primaryHand.length < 21) {
                     gestureHoldCounter = 0;
                     lastGestureTarget = null;
                     return;
                 }
 
-                // Calculate palm length as reference scale (wrist 0 to middle MCP 9)
-                const palmLength = calculateDistance(landmarks[0], landmarks[9]);
+                // 1. Calculate palm length and extension ratios for the primary hand
+                const palmLength = calculateDistance(primaryHand[0], primaryHand[9]);
                 if (palmLength < 0.01) return;
 
-                // Calculate distance from wrist (0) to each fingertip (8, 12, 16, 20)
-                const indexDist = calculateDistance(landmarks[0], landmarks[8]);
-                const middleDist = calculateDistance(landmarks[0], landmarks[12]);
-                const ringDist = calculateDistance(landmarks[0], landmarks[16]);
-                const pinkyDist = calculateDistance(landmarks[0], landmarks[20]);
+                const indexDist = calculateDistance(primaryHand[0], primaryHand[8]);
+                const middleDist = calculateDistance(primaryHand[0], primaryHand[12]);
+                const ringDist = calculateDistance(primaryHand[0], primaryHand[16]);
+                const pinkyDist = calculateDistance(primaryHand[0], primaryHand[20]);
 
-                // A finger is extended if its distance from the wrist is > 1.3 * palmLength
                 const ratioThreshold = 1.3;
                 const indexExtended = (indexDist / palmLength) > ratioThreshold;
                 const middleExtended = (middleDist / palmLength) > ratioThreshold;
                 const ringExtended = (ringDist / palmLength) > ratioThreshold;
                 const pinkyExtended = (pinkyDist / palmLength) > ratioThreshold;
 
-                // Detect "half-heart" (单手半心 / C型弧形手) gesture:
-                // 1. Thumb-index tip distance is relatively large (0.85 to 2.2 of palm length)
-                const thumbIndexDist = calculateDistance(landmarks[4], landmarks[8]);
-                const thumbIndexDistRatio = thumbIndexDist / palmLength;
+                // Function to verify if a single hand is in a "half-heart" C-shape claw posture
+                function checkHalfHeart(hand, pLength) {
+                    const thumbIndexD = calculateDistance(hand[4], hand[8]) / pLength;
+                    
+                    const iRatio = calculateDistance(hand[8], hand[5]) / pLength;
+                    const mRatio = calculateDistance(hand[12], hand[9]) / pLength;
+                    const rRatio = calculateDistance(hand[16], hand[13]) / pLength;
+                    const pRatio = calculateDistance(hand[20], hand[17]) / pLength;
 
-                // 2. All four fingers are arched (medium distance between knuckle and tip)
-                const indexRatio = calculateDistance(landmarks[8], landmarks[5]) / palmLength;
-                const middleRatio = calculateDistance(landmarks[12], landmarks[9]) / palmLength;
-                const ringRatio = calculateDistance(landmarks[16], landmarks[13]) / palmLength;
-                const pinkyRatio = calculateDistance(landmarks[20], landmarks[17]) / palmLength;
+                    let arched = 0;
+                    if (iRatio > 0.30 && iRatio < 0.76) arched++;
+                    if (mRatio > 0.30 && mRatio < 0.76) arched++;
+                    if (rRatio > 0.30 && rRatio < 0.76) arched++;
+                    if (pRatio > 0.30 && pRatio < 0.76) arched++;
 
-                let archedCount = 0;
-                if (indexRatio > 0.30 && indexRatio < 0.76) archedCount++;
-                if (middleRatio > 0.30 && middleRatio < 0.76) archedCount++;
-                if (ringRatio > 0.30 && ringRatio < 0.76) archedCount++;
-                if (pinkyRatio > 0.30 && pinkyRatio < 0.76) archedCount++;
+                    const tRatio = calculateDistance(hand[4], hand[2]) / pLength;
+                    const tArched = tRatio > 0.38;
 
-                // 3. Thumb is also arched/extended away from the hand
-                const thumbRatio = calculateDistance(landmarks[4], landmarks[2]) / palmLength;
-                const thumbArched = thumbRatio > 0.38;
+                    const iD = calculateDistance(hand[0], hand[8]);
+                    const mD = calculateDistance(hand[0], hand[12]);
+                    const rD = calculateDistance(hand[0], hand[16]);
+                    const pD = calculateDistance(hand[0], hand[20]);
 
-                // 4. Verify none of the fingers are fully extended straight (avoiding open hand conflict)
-                const fingersNotStraight = !indexExtended && !middleExtended && !ringExtended && !pinkyExtended;
+                    const notStraight = (iD/pLength <= ratioThreshold) && 
+                                        (mD/pLength <= ratioThreshold) && 
+                                        (rD/pLength <= ratioThreshold) && 
+                                        (pD/pLength <= ratioThreshold);
 
-                const isFingerHeart = (thumbIndexDistRatio > 0.85 && thumbIndexDistRatio < 2.2) &&
-                                      (archedCount >= 3) &&
-                                      thumbArched &&
-                                      fingersNotStraight;
+                    return (thumbIndexD > 0.85 && thumbIndexD < 2.2) && (arched >= 3) && tArched && notStraight;
+                }
+
+                // Check single-hand half-heart on the primary hand
+                let isFingerHeart = checkHalfHeart(primaryHand, palmLength);
+
+                // Check secondary hand half-heart or dual-hand joined heart if present
+                if (secondaryHand && secondaryHand.length >= 21) {
+                    const palmLengthSec = calculateDistance(secondaryHand[0], secondaryHand[9]);
+                    if (palmLengthSec > 0.01) {
+                        // Check if either hand is in a half-heart posture
+                        if (checkHalfHeart(secondaryHand, palmLengthSec)) {
+                            isFingerHeart = true;
+                        }
+
+                        // Check dual-hand joined heart (fingertips of index and thumb touch, middle fingers apart)
+                        const avgPalmLength = (palmLength + palmLengthSec) / 2;
+                        const indexTipsDist = calculateDistance(primaryHand[8], secondaryHand[8]) / avgPalmLength;
+                        const thumbTipsDist = calculateDistance(primaryHand[4], secondaryHand[4]) / avgPalmLength;
+                        const middleTipsDist = calculateDistance(primaryHand[12], secondaryHand[12]) / avgPalmLength;
+
+                        if (indexTipsDist < 0.65 && thumbTipsDist < 0.65 && middleTipsDist > 0.45) {
+                            isFingerHeart = true;
+                        }
+                    }
+                }
 
                 // If shape is locked during pinch interaction, do not switch shapes,
-                // EXCEPT if the user is making the specific "finger heart" gesture to trigger the Heart shape!
+                // EXCEPT if the user is making a heart gesture!
                 if (shapeLocked && !isFingerHeart) {
                     gestureHoldCounter = 0;
                     lastGestureTarget = null;
@@ -1863,7 +1887,8 @@
                         shapeLocked = false;
                     }
                     
-                    processShapeSwitchingGestures(primaryHand);
+                    const secondaryHand = results.multiHandLandmarks[1] || null;
+                    processShapeSwitchingGestures(primaryHand, secondaryHand);
                     
                     const numHands = results.multiHandLandmarks.length;
                     statusElement.textContent = numHands === 1 ? '1 hand detected (Single hand mode)' : `${numHands} hands detected (Dual hand mode)`;
