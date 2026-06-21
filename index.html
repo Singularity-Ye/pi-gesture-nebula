@@ -1743,14 +1743,15 @@
 
                 // Function to verify if a hand is in an upside-down claw-shape (倒着呈爪形)
                 function checkUpsideDownClaw(hand, pLength) {
-                    // 1. Check if fingers are pointing downwards (tips are below MCP joints in screen Y)
+                    // 1. Check if all 5 fingers are pointing downwards (tips are below MCP joints in screen Y)
                     const indexDownward = hand[8].y > hand[5].y;
                     const middleDownward = hand[12].y > hand[9].y;
                     const ringDownward = hand[16].y > hand[13].y;
                     const pinkyDownward = hand[20].y > hand[17].y;
+                    const thumbDownward = hand[4].y > hand[2].y;
                     
-                    const downwardCount = [indexDownward, middleDownward, ringDownward, pinkyDownward].filter(Boolean).length;
-                    if (downwardCount < 3) return false;
+                    const allDownward = indexDownward && middleDownward && ringDownward && pinkyDownward && thumbDownward;
+                    if (!allDownward) return false;
                     
                     // 2. Check if it is a claw shape (fingers are curved, not straight)
                     const indexStraight = isFingerStraight(hand, 5, 6, 7, 8);
