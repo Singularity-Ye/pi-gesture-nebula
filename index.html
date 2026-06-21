@@ -1804,6 +1804,24 @@
                     return straightCount <= 2;
                 }
 
+                // Function to verify if a hand is in an OK posture (thumb & index pinch, other three fingers extended)
+                function checkOkGesture(hand, pLength) {
+                    const thumbIndexD = calculateDistance(hand[4], hand[8]) / pLength;
+                    const indexExt = (calculateDistance(hand[0], hand[8]) / pLength > ratioThreshold) || isFingerStraight(hand, 5, 6, 7, 8);
+                    
+                    const mD = calculateDistance(hand[0], hand[12]);
+                    const rD = calculateDistance(hand[0], hand[16]);
+                    const pD = calculateDistance(hand[0], hand[20]);
+                    const mExtended = (mD / pLength) > ratioThreshold || isFingerStraight(hand, 9, 10, 11, 12);
+                    const rExtended = (rD / pLength) > ratioThreshold || isFingerStraight(hand, 13, 14, 15, 16);
+                    const pExtended = (pD / pLength) > ratioThreshold || isFingerStraight(hand, 17, 18, 19, 20);
+                    
+                    const otherExtendedCount = (mExtended ? 1 : 0) + (rExtended ? 1 : 0) + (pExtended ? 1 : 0);
+                    // OK gesture requires thumb and index to be close (< 0.35), index to be curled/bent,
+                    // and at least 2 of the other three fingers (middle, ring, pinky) to be extended straight.
+                    return (thumbIndexD < 0.35) && !indexExt && otherExtendedCount >= 2;
+                }
+
                 // Compute thumb-index distance ratio for C-shape claw detection
                 const primaryThumbIndexD = calculateDistance(primaryHand[4], primaryHand[8]) / palmLength;
 
@@ -1819,6 +1837,8 @@
                                     checkUpsideDownClaw(primaryHand, palmLength) ||
                                     (raisedCount === 0) ||
                                     (primaryThumbIndexD < 1.15 && !indexExtended && otherExtendedCount <= 1);
+
+                let isOkGesture = checkOkGesture(primaryHand, palmLength);
 
                 // Check secondary hand half-heart or dual-hand joined heart if present
                 if (secondaryHand && secondaryHand.length >= 21) {
@@ -1850,6 +1870,10 @@
                             isFingerHeart = true;
                         }
 
+                        if (checkOkGesture(secondaryHand, palmLengthSec)) {
+                            isOkGesture = true;
+                        }
+
                         // Check dual-hand joined heart (fingertips of index and thumb touch, middle fingers apart)
                         const avgPalmLength = (palmLength + palmLengthSec) / 2;
                         const indexTipsDist = calculateDistance(primaryHand[8], secondaryHand[8]) / avgPalmLength;
@@ -1863,8 +1887,8 @@
                 }
 
                 // If shape is locked during pinch interaction, do not switch shapes,
-                // EXCEPT if the user is making a heart gesture!
-                if (shapeLocked && !isFingerHeart) {
+                // EXCEPT if the user is making a heart gesture or an OK gesture!
+                if (shapeLocked && !isFingerHeart && !isOkGesture) {
                     gestureHistory = [];
                     return;
                 }
@@ -1872,6 +1896,8 @@
                 let targetGestureShape = null;
                 if (isFingerHeart) {
                     targetGestureShape = 'heart';
+                } else if (isOkGesture) {
+                    targetGestureShape = 'nailong';
                 } else if (raisedCount === 1 && indexExtended) {
                     targetGestureShape = 'sphere';
                 } else if (raisedCount === 2 && indexExtended && middleExtended) {
@@ -1911,7 +1937,15 @@
 
                     // Set target shape if it meets the voting threshold and is different
                     if (maxCount >= GESTURE_VOTE_THRESHOLD && mostFrequentShape !== targetShape) {
-                        setTargetShape(mostFrequentShape);
+                        if (mostFrequentShape === 'nailong' || mostFrequentShape === 'nailong_solid') {
+                            if (nailongLoaded) {
+                                setTargetShape(mostFrequentShape);
+                            } else if (!isNailongLoading) {
+                                loadAndSampleNailong(mostFrequentShape);
+                            }
+                        } else {
+                            setTargetShape(mostFrequentShape);
+                        }
                         gestureHistory = []; // Clear voting history on switch
                     }
                 } else {
