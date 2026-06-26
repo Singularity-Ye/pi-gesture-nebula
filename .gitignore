@@ -5,3 +5,8 @@ __pycache__/
 .idea/
 .vscode/
 
+# Private coursework documents and deliverables
+*.docx
+*.zip
+课程设计工程文件打包/
+models/
